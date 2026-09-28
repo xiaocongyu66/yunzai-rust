@@ -22,11 +22,6 @@ concurrency:
   group: binaries-${{ github.ref }}
   cancel-in-progress: true
 
-# 私有仓库配额有限：同一分支的新构建自动取消旧构建
-concurrency:
-  group: binaries-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   libnode:
     name: libnode-${{ matrix.out }}
