@@ -1,10 +1,8 @@
 name: Binaries
 
 # 多平台一次性构建工程：
-#   Linux(x86_64/arm64/arm32/i386, 覆盖 Ubuntu/Debian/飞牛/Arch) → tar.gz(+PKGBUILD)
-#   macOS(x86_64/arm64) → tar.gz
-#   Windows(x86_64/arm64) → zip
-# 构建成功后自动提交到仓库 bin/ 目录（[skip ci] 防循环）
+#   Linux(x86_64/arm64/arm/i386, 覆盖 Ubuntu/Debian/飞牛/Arch) + macOS(x86_64/arm64) + Windows(x86_64/arm64)
+#   产物为裸二进制，构建成功后自动平铺提交到仓库 bin/ 目录（[skip ci] 防循环）
 
 on:
   push:
@@ -75,47 +73,22 @@ jobs:
         if: matrix.e2e
         run: cargo test --release --target ${{ matrix.target }} -- --nocapture
 
-      - name: Stage bundle (unix)
+      - name: Stage binary (unix)
         if: runner.os != 'Windows'
         run: |
-          VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/version *= *"\(.*\)"/\1/')
-          SHORT=${TARGET/-unknown*/}
-          mkdir -p dist/yunzai-$SHORT
-          cp target/${{ matrix.target }}/release/yunzai dist/yunzai-$SHORT/yunzai
-          cp README.md dist/yunzai-$SHORT/ 2>/dev/null || true
-          cp config/default_config/*.yaml dist/yunzai-$SHORT/ 2>/dev/null || true
-          # Arch 用户辅助：PKGBUILD 模板
-          cat > dist/yunzai-$SHORT/PKGBUILD <<EOF
-          # Arch Linux 打包模板 — makepkg -sf 后 pacman -U
-          pkgname=yunzai-rust
-          pkgver=$VERSION
-          pkgrel=1
-          arch=('x86_64')
-          url='https://github.com/xiaocongyu66/yunzai-rust'
-          license=('GPL3')
-          package() {
-            install -Dm755 "\$srcdir/yunzai" "\$pkgdir/usr/bin/yunzai"
-          }
-          EOF
-          tar -czf dist/yunzai-$SHORT-$VERSION-$TARGET.tar.gz -C dist yunzai-$SHORT
-          echo "SHORT=$SHORT" >> $GITHUB_ENV
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-        env:
-          TARGET: ${{ matrix.target }}
+          SHORT=$(echo "${{ matrix.target }}" | sed 's/-unknown-[a-z]*//; s/x86_64/x86_64/; s/aarch64/arm64/; s/armv7/arm/; s/i686/x86/')
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/yunzai dist/yunzai-${SHORT}
+          chmod +x dist/yunzai-${SHORT}
 
-      - name: Stage bundle (windows)
+      - name: Stage binary (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $version = (Select-String -Path Cargo.toml -Pattern '^version *= *"(.+)"' |
-                      Select-Object -First 1).Matches[0].Groups[1].Value
-          $short = "${{ matrix.target }}" -replace '-pc-windows.*','' -replace '-unknown.*',''
-          New-Item -ItemType Directory -Force -Path dist/yunzai-$short | Out-Null
-          Copy-Item target/${{ matrix.target }}/release/yunzai.exe dist/yunzai-$short/
-          Copy-Item config/default_config/*.yaml dist/yunzai-$short/ -ErrorAction SilentlyContinue
-          Compress-Archive -Path dist/yunzai-$short -DestinationPath dist/yunzai-$short-$version-windows.zip
-          "SHORT=$short" | Out-File -Append $env:GITHUB_ENV
-          "VERSION=$version" | Out-File -Append $env:GITHUB_ENV
+          $short = "${{ matrix.target }}" -replace '-pc-windows.*',''
+          if ($short -eq 'aarch64') { $short = 'arm64-windows' } else { $short = 'x86_64-windows' }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item target/${{ matrix.target }}/release/yunzai.exe dist/yunzai-$short.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -145,21 +118,10 @@ jobs:
         run: |
           rm -rf bin
           mkdir -p bin
-          # 展开各 bundle：dist/ 下为 tar.gz / deb / zip，统一解到 bin/<target>/
-          for dir in artifacts/bundle-*; do
-            [ -d "$dir" ] || continue
-            target=${dir#artifacts/bundle-}
-            out=bin/$target
-            mkdir -p "$out"
-            find "$dir" -maxdepth 2 -type f \( -name "*.tar.gz" -o -name "*.zip" \) |
-              while read -r f; do cp "$f" "$out/"; done
-            # 解开裸二进制到顶层，方便直接下载
-            for f in "$out"/*.tar.gz; do
-              [ -f "$f" ] || continue
-              tar -xzf "$f" -C "$out" --strip-components=1
-            done
-          done
-          ls -R bin | head -40
+          # 直接平铺裸二进制：artifacts/bundle-*/yunzai-* → bin/
+          find artifacts -type f -name "yunzai-*" -exec cp {} bin/ \;
+          chmod +x bin/yunzai-* 2>/dev/null || true
+          ls -la bin/
 
       - name: Commit & push
         run: |
