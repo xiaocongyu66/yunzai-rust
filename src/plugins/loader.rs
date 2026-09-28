@@ -96,7 +96,9 @@ impl PluginsLoader {
             self.priority.write().unwrap().push(entry);
         }
         // JS 插件扫描（≈ getPlugins + importPlugin）
-        let engine = match self.engine.read().unwrap().clone() {
+        // 注意：read guard 必须先释放，否则 await 后同作用域取 write 锁会自死锁
+        let existing = self.engine.read().unwrap().clone();
+        let engine = match existing {
             Some(e) => Some(e),
             None => match crate::jsrt::JsEngine::new().await {
                 Ok(e) => {
