@@ -1,7 +1,7 @@
 name: Binaries
 
 # 多平台一次性构建工程：
-#   Linux(x86_64/arm64/arm32/i386, 覆盖 Ubuntu/Debian/飞牛/Arch) → tar.gz + deb(+PKGBUILD)
+#   Linux(x86_64/arm64/arm32/i386, 覆盖 Ubuntu/Debian/飞牛/Arch) → tar.gz(+PKGBUILD)
 #   macOS(x86_64/arm64) → tar.gz
 #   Windows(x86_64/arm64) → zip
 # 构建成功后自动提交到仓库 bin/ 目录（[skip ci] 防循环）
@@ -103,36 +103,6 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
 
-      - name: Build deb (linux only)
-        if: runner.os == 'Linux'
-        run: |
-          case "$TARGET" in
-            x86_64-*) DEB_ARCH=amd64 ;;
-            aarch64-*) DEB_ARCH=arm64 ;;
-            armv7-*)   DEB_ARCH=armhf ;;
-            i686-*)    DEB_ARCH=i386 ;;
-          esac
-          PKG=dist/deb/yunzai-rust_${VERSION}_${DEB_ARCH}
-          mkdir -p $PKG/DEBIAN $PKG/usr/bin
-          cp target/${{ matrix.target }}/release/yunzai $PKG/usr/bin/
-          cat > $PKG/DEBIAN/control <<EOF
-          Package: yunzai-rust
-          Version: $VERSION
-          Architecture: $DEB_ARCH
-          Maintainer: xiaocongyu66 <noreply@github.com>
-          Depends: libc6 (>= 2.31)
-          Priority: optional
-          Section: net
-          Homepage: https://github.com/xiaocongyu66/yunzai-rust
-          Description: TRSS-Yunzai v3 重制版 (Rust)
-           Rust 实现的 Yunzai 机器人核心，含 QuickJS 插件引擎。
-          EOF
-          dpkg-deb --build --root-owner-group $PKG dist/deb
-          cp dist/deb/*.deb dist/
-          rm -rf dist/deb
-        env:
-          TARGET: ${{ matrix.target }}
-
       - name: Stage bundle (windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -181,7 +151,7 @@ jobs:
             target=${dir#artifacts/bundle-}
             out=bin/$target
             mkdir -p "$out"
-            find "$dir" -maxdepth 2 -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.deb" \) |
+            find "$dir" -maxdepth 2 -type f \( -name "*.tar.gz" -o -name "*.zip" \) |
               while read -r f; do cp "$f" "$out/"; done
             # 解开裸二进制到顶层，方便直接下载
             for f in "$out"/*.tar.gz; do
