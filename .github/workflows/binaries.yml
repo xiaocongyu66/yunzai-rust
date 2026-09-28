@@ -1,27 +1,22 @@
 name: Binaries
 
-# 多平台一次性构建工程：
-#   Linux(x86_64/arm64/arm/i386, 覆盖 Ubuntu/Debian/飞牛/Arch) + macOS(x86_64/arm64) + Windows(x86_64/arm64)
+# libnode.so 一次性构建工程：
+#   用 libnode/ 目录的补丁 + 脚本，从 Node.js 官方源码构建 libnode 动态库
 #   产物为裸二进制，构建成功后自动平铺提交到仓库 bin/ 目录（[skip ci] 防循环）
+#   主程序（yunzai）的构建见 build.yml
 
 on:
   push:
     branches: [main]
     paths:
-      - "src/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
+      - "libnode/**"
       - ".github/workflows/binaries.yml"
   workflow_dispatch:
 
 permissions:
   contents: write
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
-  # ===== libnode.so 构建（Node.js 嵌入库，供运行时与 yunzai 二进制配套使用）=====
   libnode:
     name: libnode-${{ matrix.out }}
     strategy:
@@ -53,91 +48,14 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bundle-libnode-${{ matrix.out }}
+          name: bundle-${{ matrix.out }}
           path: dist/
           retention-days: 3
 
-  # ===== yunzai 主程序 =====
-  build:
-    name: ${{ matrix.target }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # ===== Linux =====
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, cross: false, e2e: true }
-          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, cross: true, e2e: false }
-          - { os: ubuntu-latest, target: armv7-unknown-linux-gnueabihf, cross: true, e2e: false }
-          - { os: ubuntu-latest, target: i686-unknown-linux-gnu, cross: true, e2e: false }
-          # ===== macOS =====
-          - { os: macos-14, target: aarch64-apple-darwin, cross: false, e2e: false }
-          - { os: macos-13, target: x86_64-apple-darwin, cross: false, e2e: false }
-          # ===== Windows =====
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, cross: false, e2e: false }
-          - { os: windows-latest, target: aarch64-pc-windows-msvc, cross: false, e2e: false }
-
-    runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.target == 'aarch64-pc-windows-msvc' }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Install cross-compilation tools
-        if: runner.os == 'Linux' && matrix.cross
-        run: |
-          sudo apt-get update
-          case "${{ matrix.target }}" in
-            aarch64-unknown-linux-gnu)
-              sudo apt-get install -y gcc-aarch64-linux-gnu
-              echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV ;;
-            armv7-unknown-linux-gnueabihf)
-              sudo apt-get install -y gcc-arm-linux-gnueabihf
-              echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc" >> $GITHUB_ENV ;;
-            i686-unknown-linux-gnu)
-              sudo apt-get install -y gcc-i686-linux-gnu
-              echo "CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER=i686-linux-gnu-gcc" >> $GITHUB_ENV ;;
-          esac
-
-      - name: Build (release)
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Run E2E tests (native x86_64 linux only)
-        if: matrix.e2e
-        run: cargo test --release --target ${{ matrix.target }} -- --nocapture
-
-      - name: Stage binary (unix)
-        if: runner.os != 'Windows'
-        run: |
-          SHORT=$(echo "${{ matrix.target }}" | sed 's/-unknown-[a-z]*//; s/x86_64/x86_64/; s/aarch64/arm64/; s/armv7/arm/; s/i686/x86/')
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/yunzai dist/yunzai-${SHORT}
-          chmod +x dist/yunzai-${SHORT}
-
-      - name: Stage binary (windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $short = "${{ matrix.target }}" -replace '-pc-windows.*',''
-          if ($short -eq 'aarch64') { $short = 'arm64-windows' } else { $short = 'x86_64-windows' }
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item target/${{ matrix.target }}/release/yunzai.exe dist/yunzai-$short.exe
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bundle-${{ matrix.target }}
-          path: dist/
-          retention-days: 3
-
-  # 汇总：全部构建成功 → 提交到 bin/
+  # 汇总：全部构建成功 → 裸文件平铺提交到 bin/
   commit-binaries:
     name: Commit to bin/
-    needs: [build, libnode]
+    needs: libnode
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -145,7 +63,7 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Download all bundles
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -155,9 +73,8 @@ jobs:
         run: |
           rm -rf bin
           mkdir -p bin
-          # 直接平铺裸二进制：artifacts/bundle-*/yunzai-* → bin/
-          find artifacts -type f -name "yunzai-*" -exec cp {} bin/ \;
-          chmod +x bin/yunzai-* 2>/dev/null || true
+          # 直接平铺裸二进制：artifacts/bundle-*/libnode-* → bin/
+          find artifacts -type f -name "libnode-*" -exec cp {} bin/ \;
           ls -la bin/
 
       - name: Commit & push
@@ -168,6 +85,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "无产物变更"
           else
-            git commit -m "ci: 多平台二进制产物 [skip ci] (${GITHUB_SHA::7})"
+            git commit -m "ci: libnode 产物 [skip ci] (${GITHUB_SHA::7})"
             git push origin main
           fi
