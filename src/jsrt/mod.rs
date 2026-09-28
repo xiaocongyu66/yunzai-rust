@@ -681,7 +681,8 @@ impl JsEngine {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_call").ok()?;
                 let promise: rquickjs::Promise = f.call((reg_key, fnc)).ok()?;
-                promise.into_future().await.unwrap_or_else(|_| "null".to_string())
+                let ret: String = promise.into_future().await.unwrap_or_else(|_| "null".to_string());
+                ret
             })
             .await
     }
@@ -693,7 +694,8 @@ impl JsEngine {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_accept").ok()?;
                 let promise: rquickjs::Promise = f.call((reg_key,)).ok()?;
-                promise.into_future().await.unwrap_or_else(|_| "null".to_string())
+                let ret: String = promise.into_future().await.unwrap_or_else(|_| "null".to_string());
+                ret
             })
             .await
     }
@@ -705,7 +707,8 @@ impl JsEngine {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_test").ok()?;
                 let promise: rquickjs::Promise = f.call((reg_key, idx, msg)).ok()?;
-                let r: String = promise.into_future().await.unwrap_or_else(|_| "false".to_string());
+                let r: String = let r: String = promise.into_future().await.unwrap_or_else(|_| "false".to_string());
+                r == "true"
                 r == "true"
             })
             .await
