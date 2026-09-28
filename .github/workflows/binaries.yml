@@ -33,7 +33,7 @@ jobs:
           - { os: ubuntu-latest, script: build-linux-amd64.bash, out: linux-x86_64 }
           - { os: macos-14, script: build-macos-arm64.bash, out: macos-arm64 }
           - { os: macos-13, script: build-macos-amd64.bash, out: macos-x86_64 }
-          - { os: ubuntu-latest, script: build-linux-armv7.bash, out: linux-armv7 }
+          - { os: ubuntu-24.04-arm, script: build-linux-armv7.bash, out: linux-armv7 }
           - { os: ubuntu-latest, script: build-linux-i386.bash, out: linux-i386 }
           # Node v22 的 vcbuild 只认 VS2022(17.x)，windows-latest 已是 VS 18 → 用 windows-2022 镜像
           - { os: windows-2022, script: build-windows-amd64.ps1, out: windows-x86_64, msvc: x64 }

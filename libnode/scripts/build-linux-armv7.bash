@@ -57,10 +57,9 @@ function clone() {
 
 function build() {
   cd ./node
+  # arm64 host：host 工具原生编译；目标 armhf 走交叉链
   export CC=arm-linux-gnueabihf-gcc
   export CXX=arm-linux-gnueabihf-g++
-  export CC_host=gcc
-  export CXX_host=g++
   ./configure \
     --shared \
     --dest-cpu arm \
@@ -69,7 +68,7 @@ function build() {
     --with-arm-float-abi hard \
     --with-intl none \
     --openssl-no-asm
-  make -j$(nproc)
+  make -j$(nproc) CC_host=gcc CXX_host=g++
   cd ../
 }
 
