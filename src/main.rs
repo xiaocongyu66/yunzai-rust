@@ -17,7 +17,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 /// 全局配置（loader 等模块引用）
-pub static GLOBAL_CFG: Lazy<std::sync::OnceLock<Arc<Cfg>>> = Lazy::new(|| std::sync::OnceLock::new());
+pub static GLOBAL_CFG: std::sync::OnceLock<Arc<Cfg>> = std::sync::OnceLock::new();
 
 /// ≈ process.start_type
 pub static START_TYPE: Lazy<String> = Lazy::new(|| {

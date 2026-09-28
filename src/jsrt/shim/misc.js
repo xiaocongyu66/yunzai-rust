@@ -82,8 +82,8 @@ globalThis.os = os
 globalThis.process = globalThis.process || {
   cwd: () => __yz_op("process_cwd", {}),
   env: {},
-  platform: __yz_op("os_platform", {}),
-  arch: __yz_op("os_arch", {}),
+  platform: "linux",
+  arch: "arm64",
   argv: [],
   execve: undefined,
 }

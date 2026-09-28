@@ -67,24 +67,26 @@ impl PluginsLoader {
         let mut count = 0;
         let mut tasks: Vec<TaskJob> = vec![];
         for plugin in crate::plugins::builtin::builtins() {
+            let key = format!("builtin/{}", plugin.name());
+            let name = plugin.name().to_string();
+            for t in plugin.tasks() {
+                tasks.push(TaskJob {
+                    name: if t.name.is_empty() { name.clone() } else { t.name },
+                    cron: t.cron.clone(),
+                    fnc: t.fnc.clone(),
+                    log: t.log,
+                    plugin_key: key.clone(),
+                });
+            }
             let entry = Arc::new(PluginEntry {
-                key: format!("builtin/{}", plugin.name()),
-                name: plugin.name().to_string(),
+                key,
+                name,
                 dsc: plugin.dsc().to_string(),
                 event: plugin.event().to_string(),
                 priority: plugin.priority(),
                 namespace: format!("builtin.{}", plugin.name()),
                 plugin: AnyPlugin::Native(plugin),
             });
-            for t in entry.plugin.tasks() {
-                tasks.push(TaskJob {
-                    name: if t.name.is_empty() { entry.name.clone() } else { t.name },
-                    cron: t.cron,
-                    fnc: t.fnc,
-                    log: t.log,
-                    plugin_key: entry.key.clone(),
-                });
-            }
             util::make_log1(
                 Level::Debug,
                 Some("Plugin"),

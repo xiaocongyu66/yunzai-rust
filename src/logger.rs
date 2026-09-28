@@ -45,7 +45,7 @@ impl Level {
             Level::Error | Level::Fatal => "error",
         }
     }
-    fn parse(s: &str) -> Level {
+    pub fn parse(s: &str) -> Level {
         match s {
             "trace" => Level::Trace,
             "debug" => Level::Debug,

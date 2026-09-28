@@ -10,6 +10,11 @@ import 'yunzai:misc'
 
 const registry = (globalThis.__yz_registry = {})
 
+// __yz_op 包装：对象参数 → JSON 字符串（Rust 端 __yz_raw_op 只收字符串）
+if (!globalThis.__yz_op) {
+  globalThis.__yz_op = (name, args) => globalThis.__yz_raw_op(String(name), JSON.stringify(args ?? {}))
+}
+
 function mkContact(e, kind, ids) {
   const base = { ...ids }
   if (kind === 'group') {
