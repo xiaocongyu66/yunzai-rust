@@ -160,6 +160,7 @@ impl PluginsLoader {
 
     /// ≈ deal — 消息分发主管线
     pub async fn deal(self: &Arc<Self>, bot: Arc<Bot>, data: Value) {
+        let engine: Option<Arc<crate::jsrt::JsEngine>> = self.engine.read().unwrap().clone();
         let mut e = E::new(bot.clone(), data);
         self.count(&e, "receive", &e.message()).await;
         if !self.check_black(&e) {
@@ -212,7 +213,7 @@ impl PluginsLoader {
                     }
                 }
                 AnyPlugin::Js(data) => {
-                    if let Some(engine) = self.engine.read().unwrap().clone() {
+                    if let Some(engine) = engine.clone() {
                         crate::jsrt::EventGuard::set(e.bot.clone(), e.data.clone());
                         engine.instantiate(&data.reg_key, &e.data).await;
                         let r = engine.accept(&data.reg_key, &e.data).await;
@@ -250,7 +251,7 @@ impl PluginsLoader {
                     Some(re) => re.is_match(&e.msg()),
                     None => {
                         // JS RegExp 兜底
-                        if let (AnyPlugin::Js(data), Some(engine)) = (&p.plugin, self.engine.read().unwrap().clone()) {
+                        if let (AnyPlugin::Js(data), Some(engine)) = (&p.plugin, engine.clone()) {
                             engine.regex_test(&data.reg_key, ri, &e.msg()).await
                         } else {
                             false
@@ -280,7 +281,7 @@ impl PluginsLoader {
                             native.handle(&mut pe, &rule.fnc).await
                         }
                         AnyPlugin::Js(data) => {
-                            if let Some(engine) = self.engine.read().unwrap().clone() {
+                            if let Some(engine) = engine.clone() {
                                 self.js_call(&engine, data, &e, &rule.fnc).await
                             } else {
                                 false
@@ -332,7 +333,7 @@ impl PluginsLoader {
                 let res = match &p.plugin {
                     AnyPlugin::Native(native) => native.handle(&mut pe, &fnc).await,
                     AnyPlugin::Js(data) => {
-                        if let Some(engine) = self.engine.read().unwrap().clone() {
+                        if let Some(engine) = engine.clone() {
                             self.js_call(&engine, data, e, &fnc).await
                         } else {
                             false
