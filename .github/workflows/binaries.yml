@@ -35,13 +35,19 @@ jobs:
           - { os: macos-13, script: build-macos-amd64.bash, out: macos-x86_64 }
           - { os: ubuntu-latest, script: build-linux-armv7.bash, out: linux-armv7 }
           - { os: ubuntu-latest, script: build-linux-i386.bash, out: linux-i386 }
-          - { os: windows-latest, script: build-windows-amd64.ps1, out: windows-x86_64 }
-          - { os: windows-latest, script: build-windows-arm64.ps1, out: windows-arm64 }
+          - { os: windows-latest, script: build-windows-amd64.ps1, out: windows-x86_64, msvc: x64 }
+          - { os: windows-latest, script: build-windows-arm64.ps1, out: windows-arm64, msvc: amd64_arm64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 300
     continue-on-error: ${{ contains(matrix.script, 'armv7') || contains(matrix.script, 'i386') || contains(matrix.script, 'windows-arm64') }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup MSVC dev environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc }}
 
       # linux 脚本内 apt-get 需要 root；macOS 的 Homebrew 拒绝 root，直接跑
       - name: Build libnode (linux)
