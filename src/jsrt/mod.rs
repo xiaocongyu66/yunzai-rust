@@ -315,27 +315,17 @@ fn op_dispatch(name: &str, args: &J) -> J {
         }
         "ctx_get" | "ctx_finish" => {
             let is_group = args.get("isGroup").and_then(J::as_bool).unwrap_or(false);
-            let self_id = CURRENT_EVENT.with(|cur| {
-                cur.borrow()
-                    .as_ref()
-                    .map(|(_, d)| d.get("self_id").map(crate::util::string).unwrap_or_default())
-                    .unwrap_or_default()
-            });
-            let scope = if is_group {
-                CURRENT_EVENT.with(|cur| {
-                    cur.borrow()
-                        .as_ref()
-                        .map(|(_, d)| d.get("group_id").map(crate::util::string).unwrap_or_default())
-                        .unwrap_or_default()
+            let (self_id, scope) = EventGuard::get(&s("key"))
+                .map(|(_, d)| {
+                    let sid = d.get("self_id").map(crate::util::string).unwrap_or_default();
+                    let sc = if is_group {
+                        d.get("group_id").map(crate::util::string).unwrap_or_default()
+                    } else {
+                        d.get("user_id").map(crate::util::string).unwrap_or_default()
+                    };
+                    (sid, sc)
                 })
-            } else {
-                CURRENT_EVENT.with(|cur| {
-                    cur.borrow()
-                        .as_ref()
-                        .map(|(_, d)| d.get("user_id").map(crate::util::string).unwrap_or_default())
-                        .unwrap_or_default()
-                })
-            };
+                .unwrap_or_default();
             let key = format!("{}.{}.{}", s("plugin"), self_id, scope);
             let mut store = crate::plugins::plugin::CONTEXTS.write().unwrap();
             if name == "ctx_finish" {

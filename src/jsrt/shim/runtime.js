@@ -61,8 +61,8 @@ function buildE(key, eJson) {
   e.recall = async (mid) => __yz_op('recall', { self_id: e.self_id, group_id: e.group_id, user_id: e.user_id, message_id: mid })
   e.setContext = (plugin, type, isGroup, time, timeout) =>
     __yz_op('ctx_set', { plugin, type, isGroup, time, timeout, e: eJson })
-  e.getContext = (plugin, type, isGroup) => __yz_op('ctx_get', { plugin, type, isGroup })
-  e.finishContext = (plugin, type, isGroup) => __yz_op('ctx_finish', { plugin, type, isGroup })
+  e.getContext = (plugin, type, isGroup) => __yz_op('ctx_get', { key, plugin, type, isGroup })
+  e.finishContext = (plugin, type, isGroup) => __yz_op('ctx_finish', { key, plugin, type, isGroup })
   const ids = { self_id: e.self_id, group_id: e.group_id, user_id: e.user_id }
   e.friend = mkContact(e, 'friend', ids)
   e.group = mkContact(e, 'group', ids)
