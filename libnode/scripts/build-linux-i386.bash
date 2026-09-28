@@ -49,7 +49,7 @@ function clone() {
   # 32 位/交叉编译时 gyp 的 CPU 检测失效，zlib SIMD 代码编译崩溃——直接关闭
   # zlib SIMD 在 32 位/交叉下必崩；chunkcopy.h 类型必须三选一，统一降级为纯 C 实现（GENERIC）
   # 注意 V8 自带一份独立 zlib（deps/v8/third_party/zlib），同样处理
-  for f in ./node/deps/zlib/zlib.gyp ./node/deps/v8/third_party/zlib/zlib.gyp; do
+  find ./node/deps -name "zlib.gyp" | while read -r f; do
     sed -i "s/\(ADLER32_SIMD\|DEFLATE_SLIDE_HASH\|INFLATE_CHUNK_SIMD\)_[A-Z0-9_]*/INFLATE_CHUNK_GENERIC/g" "$f"
   done
 }
