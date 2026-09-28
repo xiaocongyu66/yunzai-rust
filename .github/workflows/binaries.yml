@@ -17,6 +17,11 @@ on:
 permissions:
   contents: write
 
+# 私有仓库配额有限：同一分支的新构建自动取消旧构建
+concurrency:
+  group: binaries-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   libnode:
     name: libnode-${{ matrix.out }}
@@ -28,9 +33,13 @@ jobs:
           - { os: ubuntu-latest, script: build-linux-amd64.bash, out: linux-x86_64 }
           - { os: macos-14, script: build-macos-arm64.bash, out: macos-arm64 }
           - { os: macos-13, script: build-macos-amd64.bash, out: macos-x86_64 }
+          - { os: ubuntu-latest, script: build-linux-armv7.bash, out: linux-armv7 }
+          - { os: ubuntu-latest, script: build-linux-i386.bash, out: linux-i386 }
           - { os: windows-latest, script: build-windows-amd64.ps1, out: windows-x86_64 }
+          - { os: windows-latest, script: build-windows-arm64.ps1, out: windows-arm64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 300
+    continue-on-error: ${{ contains(matrix.script, 'armv7') || contains(matrix.script, 'i386') || contains(matrix.script, 'windows-arm64') }}
     steps:
       - uses: actions/checkout@v4
 
