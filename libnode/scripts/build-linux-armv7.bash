@@ -60,7 +60,6 @@ function build() {
     --dest-os linux \
     --cross-compiling \
     --with-arm-float-abi hard \
-    --with-arm-fpu neon \
     --openssl-no-asm
   make -j$(nproc) CC_host=gcc CXX_host=g++
   cd ../
