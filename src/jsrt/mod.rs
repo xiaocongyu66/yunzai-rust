@@ -589,6 +589,41 @@ pub struct JsEngine {
 }
 
 impl JsEngine {
+    /// 同步调用 JS 全局函数，返回字符串结果（无返回值时 None）
+    fn with_fn<A>(&self, name: &str, args: A) -> rquickjs::Result<Option<String>>
+    where
+        A: rquickjs::function::IntoArgs,
+    {
+        self.ctx.with(|ctx| {
+            let g = ctx.globals();
+            let f: rquickjs::Function = g.get(name)?;
+            let v: rquickjs::Value = f.call(args)?;
+            Ok(v.as_string().and_then(|s| s.to_string().ok()))
+        })
+    }
+
+    /// 三段式异步调用：启动 async JS → idle 推进 → 回读 __yz_result
+    async fn run_async<A>(&self, runner: &str, args: A) -> Option<String>
+    where
+        A: rquickjs::function::IntoArgs,
+    {
+        let started = self.ctx.with(|ctx| {
+            let g = ctx.globals();
+            let f: rquickjs::Function = g.get(runner).ok()?;
+            f.call::<A, rquickjs::Value>(args).ok()
+        });
+        started.ok()?;
+        self.rt.idle().await;
+        self.ctx
+            .with(|ctx| {
+                let g = ctx.globals();
+                let v: rquickjs::Value = g.get("__yz_result").ok()?;
+                v.into_string().map(|s| s.to_string()).ok()
+            })
+            .ok()
+            .flatten()
+    }
+
     pub async fn new() -> rquickjs::Result<JsEngine> {
         let rt = AsyncRuntime::new()?;
         let ctx = AsyncContext::full(&rt).await?;
@@ -628,16 +663,11 @@ impl JsEngine {
     pub async fn load_plugin(&self, path: &str, key: &str) -> Vec<JsPluginData> {
         let path = PathBuf::from(path).canonicalize().unwrap_or_else(|_| PathBuf::from(path));
         let path = path.to_string_lossy().to_string();
-        let key_c = key.to_string();
-        let metas: Vec<J> = rquickjs::async_with!(self.ctx.clone() => |ctx| {
-                let g = ctx.globals();
-                let f: rquickjs::Function<'_> = g.get("__yz_load_plugin").ok()?;
-                let promise: rquickjs::Promise = f.call((path, key_c)).ok()?;
-                let ret: String = promise.into_future().await.ok()?;
-                serde_json::from_str(&ret).ok()
-            })
+        let ret = self
+            .run_async("__yz_run_load", (path, key.to_string()))
             .await
-            .unwrap_or_default();
+            .unwrap_or_else(|| "null".to_string());
+        let metas: Vec<J> = serde_json::from_str(&ret).unwrap_or_default();
         metas
             .into_iter()
             .filter_map(|m| {
@@ -663,66 +693,34 @@ impl JsEngine {
     pub async fn instantiate(&self, reg_key: &str, e_data: &J) -> Option<J> {
         let e_json = serde_json::to_string(e_data).ok()?;
         let reg_key = reg_key.to_string();
-        rquickjs::async_with!(self.ctx.clone() => |ctx| {
-                let g = ctx.globals();
-                let f: rquickjs::Function<'_> = g.get("__yz_instantiate").ok()?;
-                let promise: rquickjs::Promise = f.call((reg_key, e_json)).ok()?;
-                let ret: String = promise.into_future().await.ok()?;
-                serde_json::from_str(&ret).ok()
-            })
-            .await
+        let ret = self
+            .with_fn("__yz_instantiate", (reg_key, e_json))
+            .ok()
+            .flatten()?;
+        serde_json::from_str(&ret).ok()
     }
 
     pub async fn call(&self, reg_key: &str, fnc: &str, e_data: &J) -> String {
-        let e_json = serde_json::to_string(e_data).unwrap_or_default();
-        let reg_key = reg_key.to_string();
-        let fnc = fnc.to_string();
-        rquickjs::async_with!(self.ctx.clone() => |ctx| {
-                let g = ctx.globals();
-                match g.get::<_, rquickjs::Function>("__yz_call") {
-                    Ok(f) => match f.call::<_, rquickjs::Promise>((reg_key, fnc)) {
-                        Ok(promise) => promise.into_future().await.unwrap_or_else(|_| "null".to_string()),
-                        Err(_) => "null".to_string(),
-                    },
-                    Err(_) => "null".to_string(),
-                }
-            })
+        let _ = e_json;
+        self.run_async("__yz_run_call", (reg_key.to_string(), fnc.to_string()))
             .await
+            .unwrap_or_else(|| "null".to_string())
     }
 
     pub async fn accept(&self, reg_key: &str, e_data: &J) -> String {
-        let e_json = serde_json::to_string(e_data).unwrap_or_default();
-        let reg_key = reg_key.to_string();
-        rquickjs::async_with!(self.ctx.clone() => |ctx| {
-                let g = ctx.globals();
-                match g.get::<_, rquickjs::Function>("__yz_accept") {
-                    Ok(f) => match f.call::<_, rquickjs::Promise>((reg_key,)) {
-                        Ok(promise) => promise.into_future().await.unwrap_or_else(|_| "null".to_string()),
-                        Err(_) => "null".to_string(),
-                    },
-                    Err(_) => "null".to_string(),
-                }
-            })
+        let _ = e_json;
+        self.run_async("__yz_run_accept", (reg_key.to_string(),))
             .await
+            .unwrap_or_else(|| "null".to_string())
     }
 
     pub async fn regex_test(&self, reg_key: &str, idx: usize, msg: &str) -> bool {
         let reg_key = reg_key.to_string();
         let msg = msg.to_string();
-        rquickjs::async_with!(self.ctx.clone() => |ctx| {
-                let g = ctx.globals();
-                match g.get::<_, rquickjs::Function>("__yz_test") {
-                    Ok(f) => match f.call::<_, rquickjs::Promise>((reg_key, idx, msg)) {
-                        Ok(promise) => {
-                            let r: String = promise.into_future().await.unwrap_or_else(|_| "false".to_string());
-                            r == "true"
-                        }
-                        Err(_) => false,
-                    },
-                    Err(_) => false,
-                }
-            })
-            .await
+        matches!(
+            self.with_fn("__yz_test", (reg_key, idx, msg)),
+            Ok(Some(r)) if r == "true"
+        )
     }
 }
 

@@ -10,6 +10,18 @@ import 'yunzai:misc'
 
 const registry = (globalThis.__yz_registry = {})
 
+// 异步结果中转：Rust 端「启动 → idle 推进 → 回读 __yz_result」三段式
+globalThis.__yz_result = null
+globalThis.__yz_run_load = async (path, key) => {
+  globalThis.__yz_result = await globalThis.__yz_load_plugin(path, key)
+}
+globalThis.__yz_run_call = async (key, fnc) => {
+  globalThis.__yz_result = await globalThis.__yz_call(key, fnc)
+}
+globalThis.__yz_run_accept = async (key) => {
+  globalThis.__yz_result = await globalThis.__yz_accept(key)
+}
+
 // __yz_op 包装：对象参数 → JSON 字符串（Rust 端 __yz_raw_op 只收字符串）
 if (!globalThis.__yz_op) {
   globalThis.__yz_op = (name, args) => globalThis.__yz_raw_op(String(name), JSON.stringify(args ?? {}))
