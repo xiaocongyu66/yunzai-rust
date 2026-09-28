@@ -35,8 +35,20 @@ fn rand_suffix() -> u32 {
     N.fetch_add(1, Ordering::Relaxed)
 }
 
+struct LogDumper;
+impl Drop for LogDumper {
+    fn drop(&mut self) {
+        for f in ["/tmp/e2e-child.log", "/tmp/e2e-child-err.log"] {
+            if let Ok(s) = std::fs::read_to_string(f) {
+                println!("=== 子进程日志 {} ===\n{}", f, s);
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn onebotv11_e2e() {
+    let _dumper = LogDumper;
     // 1. 准备临时运行目录
     let dir = tempfile::tempdir().unwrap();
     let cfg_dir = dir.path().join("config/config");
