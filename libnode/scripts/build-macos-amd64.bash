@@ -30,6 +30,11 @@ function clone() {
   fi
 
   git clone "$NODEJS_GIT" --branch "$NODEJS_BRANCH" --depth=1 ./node
+
+  # ARM mac 交叉编 x64：zlib 的 cpuid 内联 asm 无法交叉生成——SIMD 统一降级纯 C 实现
+  find ./node/deps -name "zlib.gyp" | while read -r f; do
+    sed -i "" "s/\(ADLER32_SIMD\|DEFLATE_SLIDE_HASH\|INFLATE_CHUNK_SIMD\)_[A-Z0-9_]*/INFLATE_CHUNK_GENERIC/g" "$f"
+  done
 }
 
 function build() {
