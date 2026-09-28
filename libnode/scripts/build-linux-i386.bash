@@ -64,6 +64,7 @@ function build() {
     --dest-cpu x86 \
     --dest-os linux \
     --no-cross-compiling \
+    --with-intl none \
     --openssl-no-asm
   make -j$(nproc)
   cd ../
