@@ -20,7 +20,8 @@ pub async fn load(bot: &Arc<Bot>) {
     crate::util::make_log1(crate::logger::Level::Info, Some("Adapter"), "-----------".into());
     crate::util::make_log1(crate::logger::Level::Info, Some("Adapter"), "加载适配器中...".into());
     crate::adapters::stdin::load(bot).await;
-    crate::util::make_log1(crate::logger::Level::Info, Some("Adapter"), "加载适配器[1个]".into());
+    crate::adapters::onebotv11::load(bot);
+    crate::util::make_log1(crate::logger::Level::Info, Some("Adapter"), "加载适配器[2个]".into());
 }
 
 fn listener_fn(

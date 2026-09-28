@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 /// ≈ events/message.js — 监听消息事件 → 插件分发
 pub async fn message_event(bot: Arc<Bot>, e: Value) {
+    eprintln!("[TRACE] message_event loader={:?}", bot.loader_arc().is_some());
     if let Some(loader) = bot.loader_arc() {
         loader.deal(bot, e).await;
     }

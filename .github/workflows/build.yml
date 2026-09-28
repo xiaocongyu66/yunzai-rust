@@ -35,6 +35,19 @@ jobs:
       - name: Build (release)
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Run E2E tests
+        if: matrix.cross == false
+        run: |
+          cargo test --release -- --nocapture 2>&1 | tee test.log
+          exit ${PIPESTATUS[0]}
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.cross == false
+        name: test-log
+        with:
+          name: test-log
+          path: test.log
+
       - name: Rename artifact
         run: |
           mkdir -p dist

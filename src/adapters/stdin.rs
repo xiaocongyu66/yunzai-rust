@@ -134,7 +134,7 @@ pub async fn load(bot: &Arc<Bot>) {
         stat: RwLock::new(json!({})),
         start_time: util::now_ms() as f64 / 1000.0,
     };
-    bot.register_bot(instance);
+    bot.register_bot(Arc::new(instance));
     bot.add_uin(ID);
 
     // stdin 读取线程 → tokio 通道

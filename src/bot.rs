@@ -23,6 +23,30 @@ pub trait ProtocolImpl: Send + Sync {
         let _ = (ctx, message_id);
         Err("当前适配器不支持撤回".into())
     }
+    async fn send_friend_forward_msg(&self, _ctx: &Value, _msg: Value) -> Result<Value, String> {
+        Err("当前适配器不支持转发".into())
+    }
+    async fn send_group_forward_msg(&self, _ctx: &Value, _msg: Value) -> Result<Value, String> {
+        Err("当前适配器不支持转发".into())
+    }
+    async fn send_friend_file(&self, _ctx: &Value, _file: Value, _name: Value) -> Result<Value, String> {
+        Err("当前适配器不支持文件".into())
+    }
+    async fn send_group_file(&self, _ctx: &Value, _file: Value, _folder: Value, _name: Value) -> Result<Value, String> {
+        Err("当前适配器不支持文件".into())
+    }
+    async fn get_friend_array(&self) -> Result<Value, String> {
+        Err("当前适配器不支持好友列表".into())
+    }
+    async fn get_group_array(&self) -> Result<Value, String> {
+        Err("当前适配器不支持群列表".into())
+    }
+    async fn get_member_array(&self, _group_id: &Value) -> Result<Value, String> {
+        Err("当前适配器不支持群成员列表".into())
+    }
+    async fn get_msg(&self, _message_id: &Value) -> Result<Value, String> {
+        Err("当前适配器不支持 get_msg".into())
+    }
 }
 
 /// ≈ adapter 元信息
@@ -264,6 +288,7 @@ impl Bot {
 
     /// ≈ em — 层级事件广播：message.group.normal → message.group → message
     pub async fn em(&self, self_arc: &Arc<Bot>, name: &str, data: Value) {
+        eprintln!("[TRACE] em: {}", name);
         let mut data = data;
         self.prepare_event(&mut data);
         let mut name = name.to_string();
@@ -346,11 +371,11 @@ impl Bot {
         self.redis.read().unwrap().clone()
     }
 
-    pub fn register_bot(&self, instance: BotInstance) {
+    pub fn register_bot(&self, instance: Arc<BotInstance>) {
         self.bots
             .write()
             .unwrap()
-            .insert(instance.self_id.clone(), Arc::new(instance));
+            .insert(instance.self_id.clone(), instance);
     }
 
     pub fn add_uin(&self, self_id: &str) {
