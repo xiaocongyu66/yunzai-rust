@@ -615,7 +615,7 @@ impl JsEngine {
         })
         .await?;
         // 预载运行时（注册 globalThis.plugin/segment/logger/redis/Bot/cfg 等）
-        rquickjs::async_with!(self.ctx.clone() => |ctx| {
+        rquickjs::async_with!(ctx.clone() => |ctx| {
             let promise = Module::evaluate(ctx.clone(), "yunzai:runtime", shim::RUNTIME)?;
             let _: Value = promise.into_future().await?;
             Ok::<_, rquickjs::Error>(())
@@ -632,7 +632,7 @@ impl JsEngine {
         let metas: Vec<J> = rquickjs::async_with!(self.ctx.clone() => |ctx| {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_load_plugin").ok()?;
-                let promise: rquickjs::Promise<'_'> = f.call((path, key)).ok()?;
+                let promise: rquickjs::Promise = f.call((path, key)).ok()?;
                 let ret = promise.into_future().await.ok()?;
                 serde_json::from_str(&ret).ok()
             })
@@ -666,7 +666,7 @@ impl JsEngine {
         rquickjs::async_with!(self.ctx.clone() => |ctx| {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_instantiate").ok()?;
-                let promise: rquickjs::Promise<String> = f.call((reg_key, e_json)).ok()?;
+                let promise: rquickjs::Promise = f.call((reg_key, e_json)).ok()?;
                 let ret = promise.into_future().await.ok()?;
                 serde_json::from_str(&ret).ok()
             })
@@ -680,7 +680,7 @@ impl JsEngine {
         rquickjs::async_with!(self.ctx.clone() => |ctx| {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_call").ok()?;
-                let promise: rquickjs::Promise<String> = f.call((reg_key, fnc)).ok()?;
+                let promise: rquickjs::Promise = f.call((reg_key, fnc)).ok()?;
                 promise.into_future().await.unwrap_or_else(|_| "null".to_string())
             })
             .await
@@ -692,7 +692,7 @@ impl JsEngine {
         rquickjs::async_with!(self.ctx.clone() => |ctx| {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_accept").ok()?;
-                let promise: rquickjs::Promise<String> = f.call((reg_key,)).ok()?;
+                let promise: rquickjs::Promise = f.call((reg_key,)).ok()?;
                 promise.into_future().await.unwrap_or_else(|_| "null".to_string())
             })
             .await
@@ -704,7 +704,7 @@ impl JsEngine {
         rquickjs::async_with!(self.ctx.clone() => |ctx| {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_test").ok()?;
-                let promise: rquickjs::Promise<String> = f.call((reg_key, idx, msg)).ok()?;
+                let promise: rquickjs::Promise = f.call((reg_key, idx, msg)).ok()?;
                 let r = promise.into_future().await.unwrap_or_else(|_| "false".to_string());
                 r == "true"
             })
