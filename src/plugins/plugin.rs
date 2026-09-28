@@ -316,6 +316,14 @@ pub struct CtxEntry {
 }
 
 impl CtxEntry {
+    pub fn new(data: Value, time: u64, timeout_reply: String) -> CtxEntry {
+        CtxEntry {
+            data,
+            deadline: if time > 0 { Some(Instant::now() + Duration::from_secs(time)) } else { None },
+            timeout_reply,
+        }
+    }
+
     pub fn expired(&self) -> bool {
         self.deadline.map(|d| Instant::now() > d).unwrap_or(false)
     }

@@ -80,10 +80,10 @@ impl Loader for YzLoader {
                 Some(s) => s,
                 None => "",
             };
-            return Module::declare(ctx, name, src);
+            return Module::declare(ctx.clone(), name, src);
         }
         let src = std::fs::read_to_string(name).map_err(rquickjs::Error::Io)?;
-        Module::declare(ctx, name, src)
+        Module::declare(ctx.clone(), name, src)
     }
 }
 
@@ -162,7 +162,10 @@ fn op_dispatch(name: &str, args: &J) -> J {
         }
         "fs_mkdir" => json!(std::fs::create_dir_all(s("path")).is_ok()),
         "fs_unlink" => json!(std::fs::remove_file(s("path")).is_ok()),
-        "fs_rm" => json!(std::fs::remove_dir_all(s("path")).is_ok().or_else(|| std::fs::remove_file(s("path")).ok()).is_some()),
+        "fs_rm" => {
+            let p = s("path");
+            json!(std::fs::remove_dir_all(&p).is_ok() || std::fs::remove_file(&p).is_ok())
+        }
         "path_join" => {
             let parts: Vec<String> = args
                 .get("parts")
@@ -171,7 +174,7 @@ fn op_dispatch(name: &str, args: &J) -> J {
                 .unwrap_or_default();
             json!(parts.join("/").replace("//", "/"))
         }
-        "path_dirname" => json!(Path::new(&s("path")).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or(".")),
+        "path_dirname" => json!(Path::new(&s("path")).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| ".".into())),
         "path_basename" => json!(Path::new(&s("path")).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()),
         "path_extname" => json!(Path::new(&s("path")).extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default()),
         "path_resolve" => {
@@ -260,7 +263,7 @@ fn op_dispatch(name: &str, args: &J) -> J {
         "yaml_parse" => serde_yaml::from_str::<J>(&s("text")).unwrap_or(J::Null),
         "yaml_stringify" => serde_yaml::to_string(args.get("obj").unwrap_or(&J::Null)).map(J::String).unwrap_or(J::Null),
         "http" => crate::jsrt::http_op(args),
-        "crypto_hash" => crate::jsrt::hash_op(&s("algo"), &s("data"), args.get("enc").map(crate::util::string).unwrap_or_else(|| "hex".into())),
+        "crypto_hash" => crate::jsrt::hash_op(&s("algo"), &s("data"), args.get("enc").map(crate::util::string).unwrap_or_else(|| String::from("hex"))),
         "crypto_uuid" => json!(ulid::Ulid::new().to_string()),
         "buffer_from" => json!(s("data")),
         "e_reply" => {
@@ -503,7 +506,10 @@ pub fn http_op(args: &J) -> J {
         };
         if let Some(J::Object(headers)) = args.get("config").and_then(|c| c.get("headers")) {
             for (k, v) in headers {
-                if let (Ok(k), Ok(v)) = (k.parse(), crate::util::string(v).parse()) {
+                if let (Ok(k), Ok(v)) = (
+                        k.parse::<reqwest::header::HeaderName>(),
+                        crate::util::string(v).parse::<reqwest::header::HeaderValue>(),
+                    ) {
                     req = req.header(k, v);
                 }
             }
