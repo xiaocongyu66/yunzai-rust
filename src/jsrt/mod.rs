@@ -23,6 +23,43 @@ use std::sync::{Arc, Mutex};
 
 pub static GLOBAL_BOT: OnceLock<Arc<Bot>> = OnceLock::new();
 
+/// node 内置/npm 模块 → 转发模块源码（default = shim 内对象；展开常用命名导出）
+/// 元组: (shim 模块, shim 内对象名, 匹配的模块名, 命名导出清单)
+fn node_module_source(bare: &str) -> Option<String> {
+    let table: &[(&str, &str, &str, &[&str])] = &[
+        ("node-shims", "fs", "fs", &[
+            "readFileSync", "writeFileSync", "existsSync", "readdirSync", "statSync",
+            "mkdirSync", "appendFileSync", "unlinkSync", "copyFileSync", "renameSync",
+            "createReadStream", "readSync", "writeSync", "closeSync", "openSync",
+        ]),
+        ("node-shims", "path", "path", &[
+            "join", "dirname", "basename", "extname", "resolve", "sep", "isAbsolute", "normalize",
+        ]),
+        ("node-shims", "util", "util", &["promisify", "inspect", "format", "types"]),
+        ("node-shims", "childProcess", "child_process", &["exec", "execSync", "spawn", "spawnSync"]),
+        ("node-shims", "crypto", "crypto", &["createHash", "randomUUID"]),
+        ("node-shims", "querystring", "querystring", &["parse", "stringify", "escape", "unescape"]),
+        ("http", "axios", "axios", &["get", "post", "put", "delete", "head", "all"]),
+        ("http", "fetch", "node-fetch", &["default"]),
+        ("http", "fetch", "fetch", &[]),
+        ("http", "Buffer", "buffer", &["from", "isBuffer", "alloc"]),
+        ("misc", "YAML", "yaml", &["parse", "stringify"]),
+        ("misc", "schedule", "node-schedule", &["scheduleJob", "cancelJob"]),
+        ("misc", "schedule", "schedule", &[]),
+        ("misc", "lodash", "lodash", &["truncate", "debounce", "throttle", "cloneDeep", "merge"]),
+        ("misc", "os", "os", &["homedir", "platform", "arch", "cpus", "totalmem", "freemem", "uptime", "hostname"]),
+    ];
+    let (shim_mod, obj, _, exports) = table.iter().find(|(_, _, m, _)| *m == bare)?;
+    let mut out = format!(
+        "import * as __ns from 'yunzai:{}'\nconst __mod = __ns[\"{}\"] || {{}}\nexport default __mod\n",
+        shim_mod, obj
+    );
+    for e in *exports {
+        out.push_str(&format!("export const {} = __mod[\"{}\"]\n", e, e));
+    }
+    Some(out)
+}
+
 fn shim_source(name: &str) -> Option<&'static str> {
     match name {
         "plugin-base" => Some(shim::PLUGIN_BASE),
@@ -81,11 +118,18 @@ struct YzLoader;
 impl Loader for YzLoader {
     fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str) -> rquickjs::Result<Module<'js>> {
         if let Some(rest) = name.strip_prefix("yunzai:") {
-            // 已实现 shim 直接用；未实现的 node 内置模块生成空 stub（默认导出空对象，容错降级）
-            let src = match shim_source(rest) {
-                Some(s) => s.to_string(),
-                None => "const stub = {}\nexport default stub\n".to_string(),
-            };
+            // yunzai:node:<name> → 生成转发模块（default + 常用命名导出）
+            if let Some(bare) = rest.strip_prefix("node:") {
+                if let Some(src) = node_module_source(bare) {
+                    return Module::declare(ctx.clone(), name, src);
+                }
+                return Module::declare(
+                    ctx.clone(),
+                    name,
+                    "const stub = {}\nexport default stub\n",
+                );
+            }
+            let src = shim_source(rest).unwrap_or("");
             return Module::declare(ctx.clone(), name, src);
         }
         let src = std::fs::read_to_string(name).map_err(rquickjs::Error::Io)?;

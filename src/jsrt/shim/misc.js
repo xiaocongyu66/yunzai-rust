@@ -8,7 +8,6 @@ export const YAML = {
   },
 }
 globalThis.YAML = YAML
-export default YAML
 
 export const schedule = {
   scheduleJob(cron, fn) {
@@ -19,7 +18,6 @@ export const schedule = {
 }
 globalThis.__yz_jobs = {}
 globalThis.nodeSchedule = schedule
-export default schedule
 
 export const lodash = new Proxy(
   {
@@ -68,7 +66,6 @@ export const lodash = new Proxy(
   },
 )
 globalThis.lodash = lodash
-export default lodash
 
 export const os = {
   homedir: () => __yz_op("os_home", {}),
@@ -81,7 +78,6 @@ export const os = {
   hostname: () => __yz_op("os_hostname", {}),
 }
 globalThis.os = os
-export default os
 
 globalThis.process = globalThis.process || {
   cwd: () => __yz_op("process_cwd", {}),
