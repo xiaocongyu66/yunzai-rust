@@ -39,14 +39,8 @@ function clone() {
 
 function build() {
   cd ./node
-  # ARM host 交叉编 x64：CPUID 内联 asm 无法跨架构生成，关闭 zlib 的 CPU 特性检测
-  export CFLAGS="-DCPU_NO_SIMD"
-  export CXXFLAGS="-DCPU_NO_SIMD"
-  export CC="gcc"
-  export CXX="g++"
-
-  # clang17 (arm64 host 交叉 x64) 对 zlib cpuid.h 的内联 asm 报 invalid constraint
-  # → 定义 CPU_NO_SIMD 跳过运行时 SIMD 检测 (功能不受影响, 仅少 SSE 加速)
+  # ARM host 交叉编 x64：CPUID 内联 asm 无法跨架构生成——跳过 zlib 运行时 SIMD 检测
+  # （clang17 对 cpuid.h 报 invalid constraint；仅少 SSE 加速，功能不受影响）
   sed -i.bak '1i\
 #define CPU_NO_SIMD' deps/zlib/cpu_features.c
 
