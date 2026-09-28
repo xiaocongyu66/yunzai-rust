@@ -114,11 +114,8 @@ impl PluginsLoader {
         };
         if let Some(engine) = engine {
             let files = crate::jsrt::scan_plugin_files("plugins");
-            eprintln!("[LOAD] 扫描完成 {}个", files.len());
             for (rel, abs) in files {
-                eprintln!("[LOAD] 开始加载 {}", rel);
                 let datas = engine.load_plugin(&abs, &rel).await;
-                eprintln!("[LOAD] 加载返回 {}个 {}", datas.len(), rel);
                 for data in datas {
                     if data.name.is_empty() {
                         continue;
@@ -142,14 +139,11 @@ impl PluginsLoader {
             }
         }
 
-        eprintln!("[LOAD] 进入排序");
         self.priority.write().unwrap().sort_by_key(|e| e.priority);
-        eprintln!("[LOAD] 排序完成");
         util::make_log1(Level::Info, Some("Plugin"), format!("加载定时任务[{}个]", tasks.len()));
         util::make_log1(Level::Info, Some("Plugin"), format!("加载插件[{}个]", count));
         *self.task.write().unwrap() = tasks;
         let _ = bot;
-        eprintln!("[LOAD] load() 结束");
     }
 
     /// JS 插件派发：实例化 + 调用，返回 false 表示 handler 返回 false（继续下一条 rule）
