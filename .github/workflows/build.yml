@@ -3,11 +3,14 @@ name: Build
 on:
   push:
     branches: [main]
-    paths:
+    paths: &paths
       - "src/**"
       - "tests/**"
       - "Cargo.toml"
       - "Cargo.lock"
+  pull_request:
+    branches: [main]
+    paths: *paths
   workflow_dispatch:
 
 jobs:
