@@ -707,8 +707,7 @@ impl JsEngine {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_test").ok()?;
                 let promise: rquickjs::Promise = f.call((reg_key, idx, msg)).ok()?;
-                let r: String = let r: String = promise.into_future().await.unwrap_or_else(|_| "false".to_string());
-                r == "true"
+                let r: String = promise.into_future().await.unwrap_or_else(|_| "false".to_string());
                 r == "true"
             })
             .await
