@@ -649,7 +649,8 @@ impl JsEngine {
                 _ => f.call::<_, rquickjs::Value>((args[0].clone(), args[1].clone(), args[2].clone()))?,
             };
             Ok::<_, rquickjs::Error>(())
-        });
+        })
+        .await;
         started.ok()?;
         self.rt.idle().await;
         self.ctx
