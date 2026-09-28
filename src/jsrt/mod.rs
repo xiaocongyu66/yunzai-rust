@@ -650,13 +650,13 @@ impl JsEngine {
         .await?;
         crate::util::make_log1(Level::Debug, Some("JsEngine"), "evaluate 预载完成，开始 idle 推进".into());
         rt.idle().await;
-        crate::util::make_log1(Level::Debug, Some("JsEngine"), "idle 完成，引擎就绪".into());
+        eprintln!("[JSRT] idle 完成，new() 返回前");
         Ok(JsEngine { rt, ctx })
     }
 
     /// 加载单个插件文件 → 元数据
     pub async fn load_plugin(&self, path: &str, key: &str) -> Vec<JsPluginData> {
-        crate::util::make_log1(Level::Debug, Some("JsEngine"), format!("load_plugin 开始 {}", path));
+        eprintln!("[JSRT] load_plugin 开始 {}", path);
         let path = PathBuf::from(path).canonicalize().unwrap_or_else(|_| PathBuf::from(path));
         let path = path.to_string_lossy().to_string();
         let path_c = path.clone();
@@ -664,7 +664,7 @@ impl JsEngine {
             .run_async("__yz_run_load", vec![path_c, key.to_string()])
             .await
             .unwrap_or_else(|| "null".to_string());
-        crate::util::make_log1(Level::Debug, Some("JsEngine"), format!("load_plugin 完成 {}", path));
+        eprintln!("[JSRT] load_plugin 完成 {}", path);
         let metas: Vec<J> = serde_json::from_str(&ret).unwrap_or_default();
         metas
             .into_iter()
