@@ -652,8 +652,6 @@ impl JsEngine {
             Ok::<_, rquickjs::Error>(())
         })
         .await;
-        })
-        .await;
         started.ok()?;
         self.rt.idle().await;
         self.ctx
