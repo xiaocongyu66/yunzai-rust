@@ -458,11 +458,11 @@ fn op_dispatch(name: &str, args: &J) -> J {
     }
 }
 
-pub fn hash_op(algo: &str, data: &str, enc: &str) -> J {
+pub fn hash_op(algo: &str, data: &str, enc: String) -> J {
     use md5::Digest;
     let bytes = data.as_bytes();
     let hex = |out: &[u8]| -> J {
-        match enc {
+        match enc.as_str() {
             "base64" => {
                 use base64::Engine;
                 json!(base64::engine::general_purpose::STANDARD.encode(out))
@@ -526,18 +526,10 @@ pub fn http_op(args: &J) -> J {
         match req.send().await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
-                let headers: J = resp
-                    .headers()
-                    .iter()
-                    .map(|(k, v)| json!({ k.as_str(): v.to_str().unwrap_or("") }))
-                    .fold(json!({}), |mut acc, h| {
-                        if let (Some(obj), Some(nv)) = (h.as_object_mut(), h.as_object()) {
-                            for (k, v) in nv {
-                                obj.insert(k.clone(), v.clone());
-                            }
-                        }
-                        acc
-                    });
+                let mut headers = json!({});
+                for (k, v) in resp.headers().iter() {
+                    headers[k.as_str()] = json!(v.to_str().unwrap_or(""));
+                }
                 let content_type = args
                     .get("config")
                     .and_then(|c| c.get("responseType"))
