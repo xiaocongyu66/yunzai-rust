@@ -43,6 +43,10 @@ impl Resolver for YzResolver {
         if name.starts_with("yunzai:") {
             return Ok(name.to_string());
         }
+        // 绝对路径直接放行（Rust 端 canonicalize 后传入 / file:// 形式）
+        if name.starts_with('/') {
+            return Ok(name.to_string());
+        }
         if name.contains("lib/plugins/plugin.js") {
             return Ok("yunzai:plugin-base".into());
         }
