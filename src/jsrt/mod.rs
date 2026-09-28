@@ -637,18 +637,30 @@ impl JsEngine {
             .flatten()
     }
 
-    /// 三段式异步调用：清空结果 → 启动 async JS → idle 推进 → 回读 __yz_result
+    /// 三段式异步调用：启动 async JS（返回 Promise，不取值）→ idle 推进 → 直读 __yz_result 全局变量
     async fn run_async(&self, runner: &str, args: Vec<String>) -> Option<String> {
-        eprintln!("[DBG-run] 1 clear");
-        self.call_js("__yz_clear_result", (Vec::new(),)).await?;
-        eprintln!("[DBG-run] 2 start {}", runner);
-        self.call_js(runner, (args,)).await?;
-        eprintln!("[DBG-run] 3 idle");
+        let started = self.ctx.with(|ctx| {
+            let g = ctx.globals();
+            let f: rquickjs::Function = g.get(runner)?;
+            let _ignored: rquickjs::Value = match args.len() {
+                0 => f.call::<(), rquickjs::Value>(())?,
+                1 => f.call::<_, rquickjs::Value>((args[0].clone(),))?,
+                2 => f.call::<_, rquickjs::Value>((args[0].clone(), args[1].clone()))?,
+                _ => f.call::<_, rquickjs::Value>((args[0].clone(), args[1].clone(), args[2].clone()))?,
+            };
+            Ok::<_, rquickjs::Error>(())
+        });
+        started.ok()?;
         self.rt.idle().await;
-        eprintln!("[DBG-run] 4 read");
-        let r = self.call_js("__yz_read_result", (Vec::new(),)).await;
-        eprintln!("[DBG-run] 5 result = {:?}", r.as_deref().map(|s| &s[..s.len().min(120)]));
-        r
+        self.ctx
+            .with(|ctx| {
+                let g = ctx.globals();
+                let v: rquickjs::Value = g.get("__yz_result")?;
+                Ok::<_, rquickjs::Error>(v.as_string().and_then(|s| s.to_string().ok()))
+            })
+            .await
+            .ok()
+            .flatten()
     }
 
     pub async fn new() -> rquickjs::Result<JsEngine> {
@@ -696,9 +708,7 @@ impl JsEngine {
             .run_async("__yz_run_load", vec![path_c, key.to_string()])
             .await
             .unwrap_or_else(|| "null".to_string());
-        eprintln!("[DBG-load] ret = {}", &ret[..ret.len().min(300)]);
         let metas: Vec<J> = serde_json::from_str(&ret).unwrap_or_default();
-        eprintln!("[DBG-load] metas = {}个", metas.len());
         metas
             .into_iter()
             .filter_map(|m| {

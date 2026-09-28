@@ -13,12 +13,15 @@ const registry = (globalThis.__yz_registry = {})
 // 异步结果中转：Rust 端「启动 → idle 推进 → 回读 __yz_result」三段式
 globalThis.__yz_result = null
 globalThis.__yz_run_load = async (path, key) => {
+  globalThis.__yz_result = null
   globalThis.__yz_result = await globalThis.__yz_load_plugin(path, key)
 }
 globalThis.__yz_run_call = async (key, fnc) => {
+  globalThis.__yz_result = null
   globalThis.__yz_result = await globalThis.__yz_call(key, fnc)
 }
 globalThis.__yz_run_accept = async (key) => {
+  globalThis.__yz_result = null
   globalThis.__yz_result = await globalThis.__yz_accept(key)
 }
 globalThis.__yz_read_result = () => String(globalThis.__yz_result ?? "null")
