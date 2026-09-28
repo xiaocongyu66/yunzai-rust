@@ -47,12 +47,8 @@ function clone() {
   git clone "$NODEJS_GIT" --branch "$NODEJS_BRANCH" --depth=1 ./node
 
   # 32 位/交叉编译时 gyp 的 CPU 检测失效，zlib SIMD 代码编译崩溃——直接关闭
-  sed -i "s/\[ 'ADLER32_SIMD_SSSE3' \]/[]/g" ./node/deps/zlib/zlib.gyp
-  sed -i "s/\[ 'ADLER32_SIMD_NEON' \]/[]/g" ./node/deps/zlib/zlib.gyp
-  sed -i "s/\[ 'DEFLATE_SLIDE_HASH_SSE2' \]/[]/g" ./node/deps/zlib/zlib.gyp
-  sed -i "s/'DEFLATE_SLIDE_HASH_NEON',/ /g" ./node/deps/zlib/zlib.gyp
-  sed -i "s/\[ 'INFLATE_CHUNK_SIMD_SSE2' \]/[]/g" ./node/deps/zlib/zlib.gyp
-  sed -i "s/\[ 'INFLATE_CHUNK_SIMD_NEON' \]/[]/g" ./node/deps/zlib/zlib.gyp
+  # zlib.gyp 的 arm_fpu 默认即 neon，SIMD 宏在 32 位/交叉下必崩——全量清空
+  sed -i "s/\(ADLER32_SIMD\|DEFLATE_SLIDE_HASH\|INFLATE_CHUNK_SIMD\)_[A-Z0-9_]*/NO_SIMD_DEFINED/g" ./node/deps/zlib/zlib.gyp
 }
 
 function build() {
