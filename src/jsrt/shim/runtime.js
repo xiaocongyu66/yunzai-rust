@@ -22,6 +22,10 @@ globalThis.__yz_run_accept = async (key) => {
   globalThis.__yz_result = await globalThis.__yz_accept(key)
 }
 globalThis.__yz_read_result = () => String(globalThis.__yz_result ?? "null")
+// 每次启动前清空，防止上一轮结果的陈旧残留
+globalThis.__yz_clear_result = () => {
+  globalThis.__yz_result = null
+}
 
 // __yz_op 包装：对象参数 → JSON 字符串（Rust 端 __yz_raw_op 只收字符串）
 if (!globalThis.__yz_op) {

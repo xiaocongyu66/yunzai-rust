@@ -154,10 +154,10 @@ impl PluginsLoader {
         e: &E,
         fnc: &str,
     ) -> bool {
-        crate::jsrt::EventGuard::set(e.bot.clone(), e.data.clone());
+        crate::jsrt::EventGuard::set(&data.reg_key, e.bot.clone(), e.data.clone());
         engine.instantiate(&data.reg_key, &e.data).await;
         let ret = engine.call(&data.reg_key, fnc, &e.data).await;
-        crate::jsrt::EventGuard::clear();
+        crate::jsrt::EventGuard::clear(&data.reg_key);
         ret != "false"
     }
 
@@ -217,10 +217,10 @@ impl PluginsLoader {
                 }
                 AnyPlugin::Js(data) => {
                     if let Some(engine) = engine.clone() {
-                        crate::jsrt::EventGuard::set(e.bot.clone(), e.data.clone());
+                        crate::jsrt::EventGuard::set(&data.reg_key, e.bot.clone(), e.data.clone());
                         engine.instantiate(&data.reg_key, &e.data).await;
                         let r = engine.accept(&data.reg_key, &e.data).await;
-                        crate::jsrt::EventGuard::clear();
+                        crate::jsrt::EventGuard::clear(&data.reg_key);
                         if r == "return" {
                             return;
                         }

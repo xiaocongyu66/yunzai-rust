@@ -88,8 +88,12 @@ impl Loader for YzLoader {
     }
 }
 
-thread_local! {
-    static CURRENT_EVENT: std::cell::RefCell<Option<(Arc<Bot>, J)>> = const { std::cell::RefCell::new(None) };
+/// 当前派发事件上下文：reg_key → (bot, e_data)
+/// 全局映射而非 thread_local —— tokio 多线程下 with 闭包可能在不同线程 poll
+static CURRENT_EVENTS: OnceLock<Mutex<HashMap<String, (Arc<Bot>, J)>>> = OnceLock::new();
+
+fn current_events() -> &'static Mutex<HashMap<String, (Arc<Bot>, J)>> {
+    CURRENT_EVENTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn block_on<F: std::future::Future>(fut: F) -> F::Output {
@@ -268,17 +272,13 @@ fn op_dispatch(name: &str, args: &J) -> J {
         "crypto_uuid" => json!(ulid::Ulid::new().to_string()),
         "buffer_from" => json!(s("data")),
         "e_reply" => {
-            let ret = CURRENT_EVENT.with(|cur| {
-                if let Some((bot, data)) = cur.borrow().as_ref() {
-                    let e = crate::plugins::plugin::E::new(bot.clone(), data.clone());
-                    let msg: J = serde_json::from_str(&s("msg")).unwrap_or(J::Null);
-                    let opts: J = serde_json::from_str(&s("data")).unwrap_or(json!({}));
-                    block_on(e.reply_with(msg, args.get("quote").and_then(J::as_bool).unwrap_or(false), opts)).ok()
-                } else {
-                    None
-                }
+            let ret = EventGuard::get(&s("key")).and_then(|(bot, data)| {
+                let e = crate::plugins::plugin::E::new(bot, data);
+                let msg: J = serde_json::from_str(&s("msg")).unwrap_or(J::Null);
+                let opts: J = serde_json::from_str(&s("data")).unwrap_or(json!({}));
+                block_on(e.reply_with(msg, args.get("quote").and_then(J::as_bool).unwrap_or(false), opts)).ok()
             });
-            ret.map(|r| r).unwrap_or(J::Null)
+            ret.unwrap_or(J::Null)
         }
         "recall" => {
             let ctx_v = json!({ "self_id": s("self_id"), "group_id": args.get("group_id").cloned().unwrap_or(J::Null), "user_id": args.get("user_id").cloned().unwrap_or(J::Null) });
@@ -459,6 +459,18 @@ fn op_dispatch(name: &str, args: &J) -> J {
     }
 }
 
+/// query 值百分号编码（保留 JS encodeURIComponent 的空格→%20 语义）
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            other => out.push_str(&format!("%{:02X}", other)),
+        }
+    }
+    out
+}
+
 pub fn hash_op(algo: &str, data: &str, enc: String) -> J {
     use md5::Digest;
     let bytes = data.as_bytes();
@@ -495,6 +507,27 @@ pub fn http_op(args: &J) -> J {
         if url.is_empty() {
             return J::Null;
         }
+        // axios 风格 config.params → URL query（生态兼容：axios.get(url, { params }) ）
+        let url = if let Some(J::Object(params)) = args.get("config").and_then(|c| c.get("params")) {
+            let query: Vec<String> = params
+                .iter()
+                .filter(|(_, v)| !v.is_null())
+                .map(|(k, v)| {
+                    let val = match v {
+                        J::Array(a) => a.iter().map(crate::util::string).collect::<Vec<_>>().join(","),
+                        other => crate::util::string(other),
+                    };
+                    format!("{}={}", k, urlencode(&val))
+                })
+                .collect();
+            if query.is_empty() {
+                url
+            } else {
+                format!("{}{}{}", url, if url.contains('?') { '&' } else { '?' }, query.join("&"))
+            }
+        } else {
+            url
+        };
         let client = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build() {
             Ok(c) => c,
             Err(_) => return J::Null,
@@ -610,8 +643,9 @@ impl JsEngine {
             .flatten()
     }
 
-    /// 三段式异步调用：启动 async JS → idle 推进 jobs → 回读 __yz_result
+    /// 三段式异步调用：清空结果 → 启动 async JS → idle 推进 → 回读 __yz_result
     async fn run_async(&self, runner: &str, args: Vec<String>) -> Option<String> {
+        self.call_js("__yz_clear_result", (Vec::new(),)).await?;
         self.call_js(runner, (args,)).await?;
         self.rt.idle().await;
         self.call_js("__yz_read_result", (Vec::new(),)).await
@@ -767,14 +801,21 @@ pub fn scan_plugin_files(dir: &str) -> Vec<(String, String)> {
     ret
 }
 
-/// 当前事件上下文的设置/清除（instantiate/call 期间）
+/// 当前事件上下文的设置/清除（按 reg_key，instantiate/call 期间）
 pub struct EventGuard;
 impl EventGuard {
-    pub fn set(bot: Arc<Bot>, data: J) {
-        CURRENT_EVENT.with(|cur| *cur.borrow_mut() = Some((bot, data)));
+    pub fn set(key: &str, bot: Arc<Bot>, data: J) {
+        if let Ok(mut map) = current_events().lock() {
+            map.insert(key.to_string(), (bot, data));
+        }
     }
-    pub fn clear() {
-        CURRENT_EVENT.with(|cur| *cur.borrow_mut() = None);
+    pub fn clear(key: &str) {
+        if let Ok(mut map) = current_events().lock() {
+            map.remove(key);
+        }
+    }
+    pub fn get(key: &str) -> Option<(Arc<Bot>, J)> {
+        current_events().lock().ok().and_then(|m| m.get(key).cloned())
     }
 }
 
