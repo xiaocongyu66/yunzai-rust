@@ -644,7 +644,8 @@ impl JsEngine {
         ctx.with(|ctx| {
             let _promise = Module::evaluate(ctx, "yunzai:runtime", shim::RUNTIME)?;
             Ok::<_, rquickjs::Error>(())
-        })?;
+        })
+        .await?;
         rt.idle().await;
         Ok(JsEngine { rt, ctx })
     }
