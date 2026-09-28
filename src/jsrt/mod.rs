@@ -659,8 +659,9 @@ impl JsEngine {
         crate::util::make_log1(Level::Debug, Some("JsEngine"), format!("load_plugin 开始 {}", path));
         let path = PathBuf::from(path).canonicalize().unwrap_or_else(|_| PathBuf::from(path));
         let path = path.to_string_lossy().to_string();
+        let path_c = path.clone();
         let ret = self
-            .run_async("__yz_run_load", vec![path, key.to_string()])
+            .run_async("__yz_run_load", vec![path_c, key.to_string()])
             .await
             .unwrap_or_else(|| "null".to_string());
         crate::util::make_log1(Level::Debug, Some("JsEngine"), format!("load_plugin 完成 {}", path));

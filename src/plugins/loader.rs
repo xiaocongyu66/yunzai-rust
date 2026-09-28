@@ -1,7 +1,7 @@
 //! ≈ lib/plugins/loader.js — 插件加载与消息分发管线
 use crate::bot::Bot;
 use crate::logger::{self, Level};
-use crate::plugins::plugin::{Accept, E, Plugin};
+use crate::plugins::plugin::{Accept, E, Permission, Plugin};
 use crate::util;
 use once_cell::sync::Lazy;
 use regex::Regex;
