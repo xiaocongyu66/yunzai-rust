@@ -10,6 +10,8 @@ on:
     branches: [main]
     paths:
       - "libnode/**"
+      - "!libnode/README.md"
+      - "!libnode/LICENSE"
   workflow_dispatch:
 
 permissions:
