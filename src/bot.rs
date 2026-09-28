@@ -288,7 +288,6 @@ impl Bot {
 
     /// ≈ em — 层级事件广播：message.group.normal → message.group → message
     pub async fn em(&self, self_arc: &Arc<Bot>, name: &str, data: Value) {
-        eprintln!("[TRACE] em: {}", name);
         let mut data = data;
         self.prepare_event(&mut data);
         let mut name = name.to_string();

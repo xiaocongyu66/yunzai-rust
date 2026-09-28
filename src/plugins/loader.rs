@@ -94,31 +94,22 @@ impl PluginsLoader {
 
     /// ≈ deal — 消息分发主管线
     pub async fn deal(self: &Arc<Self>, bot: Arc<Bot>, data: Value) {
-        eprintln!("[TRACE] deal 进入");
         let mut e = E::new(bot.clone(), data);
-        eprintln!("[TRACE] A: count前");
         self.count(&e, "receive", &e.message()).await;
-        eprintln!("[TRACE] B: count后 black前");
         if !self.check_black(&e) {
             return;
         }
-        eprintln!("[TRACE] C: black后");
         let group_cfg = CFG.get_group(&e.self_id(), &util::string(&e.group_id()));
-        eprintln!("[TRACE] D: group_cfg后");
         if !self.check_limit(&e, &group_cfg) {
             return;
         }
-        eprintln!("[TRACE] E: limit后");
         self.deal_event(&bot, &mut e, &group_cfg);
-        eprintln!("[TRACE] F: deal_event后");
         // ≈ 设置冷却
         if truthy(&e.get("only_reply_at")) {
             self.set_limit(&e, &group_cfg);
         }
         // ≈ Runtime.init — miao/genshin 缺失时降级为空操作
-        eprintln!("[TRACE] G: gate后");
         let priority: Vec<Arc<PluginEntry>> = self.priority.read().unwrap().clone();
-        eprintln!("[TRACE] H: priority后");
         let mut filtered = vec![];
         for p in priority {
             if self.check_disable(&p.name, &group_cfg) && filt_event(&e.data, &p.event) {
@@ -127,12 +118,10 @@ impl PluginsLoader {
         }
         // 上下文 hook
         let hook = self.context_hook(&filtered, &e).await;
-        eprintln!("[TRACE] I: context_hook={}", hook);
         if hook {
             return;
         }
         // only_reply_at 门
-        eprintln!("[TRACE] J: only_reply_at={:?} filtered={}", e.data.get("only_reply_at"), filtered.len());
         if !truthy(&e.get("only_reply_at")) {
             return;
         }
@@ -145,10 +134,8 @@ impl PluginsLoader {
             e.data["game"] = json!("zzz");
             e.data["msg"] = json!(ZZZ_REG.replace(&msg, "#绝区零").to_string());
         }
-        eprintln!("[TRACE] 过滤后插件数={} 上下文hook完成", filtered.len());
         // accept 链
         for p in &filtered {
-            eprintln!("[TRACE] accept: {}", p.name);
             let mut pe = with_plugin_name(&e, &p.name);
             match p.plugin.accept(&mut pe).await {
                 Accept::Return => return,
@@ -167,7 +154,6 @@ impl PluginsLoader {
                 if !rule.reg.is_match(&e.msg()) {
                     continue;
                 }
-                eprintln!("[TRACE] rule命中 {}({})", p.name, rule.fnc);
                 let log_fnc = logger::blue(format!("[{}({})]", p.name, rule.fnc));
                 util::make_log(
                     if rule.log { Level::Info } else { Level::Debug },
