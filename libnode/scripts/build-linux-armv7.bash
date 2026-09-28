@@ -28,6 +28,8 @@ function prepare() {
     gcc-arm-linux-gnueabihf \
     g++-arm-linux-gnueabihf \
     libc6-dev-armhf-cross \
+    libstdc++-13-dev-armhf-cross \
+    libgcc-13-dev-armhf-cross \
     pkg-config
 }
 
