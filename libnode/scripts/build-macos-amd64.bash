@@ -31,21 +31,24 @@ function clone() {
 
   git clone "$NODEJS_GIT" --branch "$NODEJS_BRANCH" --depth=1 ./node
 
-  # ARM mac 交叉编 x64：zlib 的 cpuid 内联 asm 无法交叉生成——SIMD 统一降级纯 C 实现
-  find ./node/deps -name "zlib.gyp" | while read -r f; do
-    sed -i "" "s/\(ADLER32_SIMD\|DEFLATE_SLIDE_HASH\|INFLATE_CHUNK_SIMD\)_[A-Z0-9_]*/INFLATE_CHUNK_GENERIC/g" "$f"
-  done
+  # ARM mac 交叉编 x64：zlib SIMD 全降级纯 C（python 正则跨平台一致，BSD sed 不支持 \| 交替）
+  python3 - <<'EOF'
+import re, pathlib
+for p in pathlib.Path('./node/deps').rglob('zlib.gyp'):
+    s = p.read_text()
+    s = re.sub(r'(ADLER32_SIMD|DEFLATE_SLIDE_HASH|INFLATE_CHUNK_SIMD)_[A-Z0-9_]*', 'INFLATE_CHUNK_GENERIC', s)
+    p.write_text(s)
+EOF
 }
 
 function build() {
   cd ./node
-  # ARM host 交叉编 x64：CPUID 内联 asm 无法跨架构生成——跳过 zlib 运行时 SIMD 检测
-  # （clang17 对 cpuid.h 报 invalid constraint；仅少 SSE 加速，功能不受影响）
-  # 覆盖全部 zlib 副本：deps/zlib + deps/v8/third_party/zlib（host 工具链也编它）
-  find ./node/deps -name "cpu_features.c" -path "*zlib*" | while read -r f; do
-    sed -i.bak '1i\
-#define CPU_NO_SIMD' "$f"
-  done
+  # CPUID 内联 asm 跨架构不可生成——全部 zlib 副本（deps/zlib + V8 副本）跳过运行时 SIMD 检测
+  python3 - <<'EOF'
+import pathlib
+for p in pathlib.Path('./node/deps').rglob('cpu_features.c'):
+    p.write_text('#define CPU_NO_SIMD\n' + p.read_text())
+EOF
 
   ./configure \
     --shared \
