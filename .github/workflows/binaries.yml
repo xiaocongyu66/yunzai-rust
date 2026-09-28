@@ -29,7 +29,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, script: build-linux-arm64.bash, out: linux-arm64 }
+          - { os: ubuntu-24.04-arm, script: build-linux-arm64.bash, out: linux-arm64 }
           - { os: ubuntu-latest, script: build-linux-amd64.bash, out: linux-x86_64 }
           - { os: macos-14, script: build-macos-arm64.bash, out: macos-arm64 }
           - { os: macos-13, script: build-macos-amd64.bash, out: macos-x86_64 }
