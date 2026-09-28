@@ -11,10 +11,11 @@ pub mod shim {
 }
 
 use crate::bot::Bot;
+use crate::logger::Level;
 use std::sync::OnceLock;
 use rquickjs::loader::{Loader, Resolver};
 use rquickjs::prelude::Func;
-use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Module, Value};
+use rquickjs::{AsyncContext, AsyncRuntime, Ctx, Module};
 use serde_json::{json, Value as J};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -640,24 +641,29 @@ impl JsEngine {
             .ok();
         })
         .await;
+        util::make_log1(Level::Debug, Some("JsEngine"), "全局桥注册完成".into());
         // 预载运行时（注册 globalThis.plugin/segment/logger/redis/Bot/cfg 等）
         ctx.with(|ctx| {
             let _promise = Module::evaluate(ctx, "yunzai:runtime", shim::RUNTIME)?;
             Ok::<_, rquickjs::Error>(())
         })
         .await?;
+        util::make_log1(Level::Debug, Some("JsEngine"), "evaluate 预载完成，开始 idle 推进".into());
         rt.idle().await;
+        util::make_log1(Level::Debug, Some("JsEngine"), "idle 完成，引擎就绪".into());
         Ok(JsEngine { rt, ctx })
     }
 
     /// 加载单个插件文件 → 元数据
     pub async fn load_plugin(&self, path: &str, key: &str) -> Vec<JsPluginData> {
+        util::make_log1(Level::Debug, Some("JsEngine"), format!("load_plugin 开始 {}", path));
         let path = PathBuf::from(path).canonicalize().unwrap_or_else(|_| PathBuf::from(path));
         let path = path.to_string_lossy().to_string();
         let ret = self
             .run_async("__yz_run_load", vec![path, key.to_string()])
             .await
             .unwrap_or_else(|| "null".to_string());
+        util::make_log1(Level::Debug, Some("JsEngine"), format!("load_plugin 完成 {}", path));
         let metas: Vec<J> = serde_json::from_str(&ret).unwrap_or_default();
         metas
             .into_iter()

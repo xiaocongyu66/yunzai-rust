@@ -11,6 +11,7 @@ use std::sync::{Arc, RwLock};
 pub const ID: &str = "stdin";
 pub const NAME: &str = "标准输入";
 
+#[allow(dead_code)]
 pub fn meta() -> AdapterMeta {
     AdapterMeta { id: ID.into(), name: NAME.into(), path: "data/stdin/".into() }
 }

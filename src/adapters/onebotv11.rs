@@ -14,6 +14,7 @@ pub const ID: &str = "QQ";
 pub const NAME: &str = "OneBotv11";
 const TIMEOUT_MS: u64 = 60000;
 
+#[allow(dead_code)]
 pub fn meta() -> AdapterMeta {
     AdapterMeta { id: ID.into(), name: NAME.into(), path: PATH.into() }
 }

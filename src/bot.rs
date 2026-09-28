@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 /// 协议实现 trait —— 适配器为每个接入账号提供（≈ OneBotv11 适配器方法面）
 #[async_trait::async_trait]
+#[allow(dead_code)]
 pub trait ProtocolImpl: Send + Sync {
     async fn send_api(&self, _action: &str, _params: Value) -> Result<Value, String> {
         Err("当前适配器不支持 send_api".into())
@@ -51,6 +52,7 @@ pub trait ProtocolImpl: Send + Sync {
 
 /// ≈ adapter 元信息
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct AdapterMeta {
     pub id: String,
     pub name: String,
@@ -58,6 +60,7 @@ pub struct AdapterMeta {
 }
 
 /// ≈ Bot[data.self_id] — 每个协议连接一个实例
+#[allow(dead_code)]
 pub struct BotInstance {
     pub self_id: String,
     pub adapter_id: String,
@@ -74,6 +77,7 @@ pub struct BotInstance {
     pub start_time: f64,
 }
 
+#[allow(dead_code)]
 impl BotInstance {
     pub fn uin(&self) -> Value {
         self.info.read().unwrap().get("user_id").cloned().unwrap_or(json!(self.self_id))
@@ -91,6 +95,7 @@ pub struct Friend {
     pub data: Value,
 }
 
+#[allow(dead_code)]
 impl Friend {
     fn ctx(&self) -> Value {
         let mut o = self.data.clone();
@@ -131,6 +136,7 @@ pub struct Group {
     pub data: Value,
 }
 
+#[allow(dead_code)]
 impl Group {
     fn ctx(&self) -> Value {
         let mut o = self.data.clone();
