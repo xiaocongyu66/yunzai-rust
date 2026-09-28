@@ -61,7 +61,7 @@ jobs:
       - name: Build libnode (windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: libnode/scripts/${{ matrix.script }} default
+        run: libnode/scripts/${{ matrix.script }}
         env:
           NODEJS_GIT: https://github.com/nodejs/node
           NODEJS_BRANCH: v22.22.0

@@ -25,4 +25,8 @@ function copy-release() {
   Copy-Item -Path .\node\out\Release\node.exe -Destination .\release\libnode-windows-arm64 -ErrorAction SilentlyContinue
 }
 
-&$args[0]
+prepare
+clone
+build
+copy-release
+

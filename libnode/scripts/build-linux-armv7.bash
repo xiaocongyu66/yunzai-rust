@@ -22,7 +22,6 @@ function prepare() {
     ccache \
     linux-libc-dev \
     build-essential \
-    libssl-dev:armhf \
     wget \
     cmake \
     jq \

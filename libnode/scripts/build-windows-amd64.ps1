@@ -22,4 +22,7 @@ function copy-release() {
   Copy-Item -Path .\node\out\Release\node.exe -Destination .\release\libnode-windows-amd64
 }
 
-&$args[0]
+prepare
+clone
+build
+copy-release
