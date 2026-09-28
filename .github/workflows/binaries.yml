@@ -26,6 +26,7 @@ jobs:
           - { os: ubuntu-latest, script: build-linux-amd64.bash, out: linux-x86_64 }
           - { os: macos-14, script: build-macos-arm64.bash, out: macos-arm64 }
           - { os: macos-13, script: build-macos-amd64.bash, out: macos-x86_64 }
+          - { os: windows-latest, script: build-windows-amd64.ps1, out: windows-x86_64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 300
     steps:
@@ -37,21 +38,39 @@ jobs:
         run: sudo -E bash libnode/scripts/${{ matrix.script }}
         env:
           NODEJS_GIT: https://github.com/nodejs/node
-          NODEJS_BRANCH: v24.5.0
+          NODEJS_BRANCH: v22.22.0
 
       - name: Build libnode (macos)
         if: runner.os == 'macOS'
         run: bash libnode/scripts/${{ matrix.script }}
         env:
           NODEJS_GIT: https://github.com/nodejs/node
-          NODEJS_BRANCH: v24.5.0
+          NODEJS_BRANCH: v22.22.0
 
-      - name: Stage binary
+      - name: Build libnode (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: libnode/scripts/${{ matrix.script }}
+        env:
+          NODEJS_GIT: https://github.com/nodejs/node
+          NODEJS_BRANCH: v22.22.0
+
+      - name: Stage binary (unix)
+        if: runner.os != 'Windows'
         run: |
           mkdir -p dist
           cp release/libnode-*/libnode.so dist/libnode-${{ matrix.out }}.so
           cp release/libnode-*/node dist/libnode-${{ matrix.out }}-node 2>/dev/null || true
           ls -la dist/
+
+      - name: Stage binary (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item release/libnode-*/libnode.dll dist/libnode-${{ matrix.out }}.dll -ErrorAction SilentlyContinue
+          Get-ChildItem release/libnode-*/ -Filter "libnode.*" | Copy-Item -Destination dist -ErrorAction SilentlyContinue
+          Get-ChildItem dist/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
