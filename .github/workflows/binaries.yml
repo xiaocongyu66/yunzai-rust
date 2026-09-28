@@ -1,0 +1,204 @@
+name: Binaries
+
+# 多平台一次性构建工程：
+#   Linux(x86_64/arm64/arm32/i386, 覆盖 Ubuntu/Debian/飞牛/Arch) → tar.gz + deb(+PKGBUILD)
+#   macOS(x86_64/arm64) → tar.gz
+#   Windows(x86_64/arm64) → zip
+# 构建成功后自动提交到仓库 bin/ 目录（[skip ci] 防循环）
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/binaries.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ===== Linux =====
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, cross: false, e2e: true }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, cross: true, e2e: false }
+          - { os: ubuntu-latest, target: armv7-unknown-linux-gnueabihf, cross: true, e2e: false }
+          - { os: ubuntu-latest, target: i686-unknown-linux-gnu, cross: true, e2e: false }
+          # ===== macOS =====
+          - { os: macos-14, target: aarch64-apple-darwin, cross: false, e2e: false }
+          - { os: macos-13, target: x86_64-apple-darwin, cross: false, e2e: false }
+          # ===== Windows =====
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, cross: false, e2e: false }
+          - { os: windows-latest, target: aarch64-pc-windows-msvc, cross: false, e2e: false }
+
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.target == 'aarch64-pc-windows-msvc' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: runner.os == 'Linux' && matrix.cross
+        run: |
+          sudo apt-get update
+          case "${{ matrix.target }}" in
+            aarch64-unknown-linux-gnu)
+              sudo apt-get install -y gcc-aarch64-linux-gnu
+              echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV ;;
+            armv7-unknown-linux-gnueabihf)
+              sudo apt-get install -y gcc-arm-linux-gnueabihf
+              echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc" >> $GITHUB_ENV ;;
+            i686-unknown-linux-gnu)
+              sudo apt-get install -y gcc-i686-linux-gnu
+              echo "CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER=i686-linux-gnu-gcc" >> $GITHUB_ENV ;;
+          esac
+
+      - name: Build (release)
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Run E2E tests (native x86_64 linux only)
+        if: matrix.e2e
+        run: cargo test --release --target ${{ matrix.target }} -- --nocapture
+
+      - name: Stage bundle (unix)
+        if: runner.os != 'Windows'
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/version *= *"\(.*\)"/\1/')
+          SHORT=${TARGET/-unknown*/}
+          mkdir -p dist/yunzai-$SHORT
+          cp target/${{ matrix.target }}/release/yunzai dist/yunzai-$SHORT/yunzai
+          cp README.md dist/yunzai-$SHORT/ 2>/dev/null || true
+          cp config/default_config/*.yaml dist/yunzai-$SHORT/ 2>/dev/null || true
+          # Arch 用户辅助：PKGBUILD 模板
+          cat > dist/yunzai-$SHORT/PKGBUILD <<EOF
+          # Arch Linux 打包模板 — makepkg -sf 后 pacman -U
+          pkgname=yunzai-rust
+          pkgver=$VERSION
+          pkgrel=1
+          arch=('x86_64')
+          url='https://github.com/xiaocongyu66/yunzai-rust'
+          license=('GPL3')
+          package() {
+            install -Dm755 "\$srcdir/yunzai" "\$pkgdir/usr/bin/yunzai"
+          }
+          EOF
+          tar -czf dist/yunzai-$SHORT-$VERSION-$TARGET.tar.gz -C dist yunzai-$SHORT
+          echo "SHORT=$SHORT" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+        env:
+          TARGET: ${{ matrix.target }}
+
+      - name: Build deb (linux only)
+        if: runner.os == 'Linux'
+        run: |
+          case "$TARGET" in
+            x86_64-*) DEB_ARCH=amd64 ;;
+            aarch64-*) DEB_ARCH=arm64 ;;
+            armv7-*)   DEB_ARCH=armhf ;;
+            i686-*)    DEB_ARCH=i386 ;;
+          esac
+          PKG=dist/deb/yunzai-rust_${VERSION}_${DEB_ARCH}
+          mkdir -p $PKG/DEBIAN $PKG/usr/bin
+          cp target/${{ matrix.target }}/release/yunzai $PKG/usr/bin/
+          cat > $PKG/DEBIAN/control <<EOF
+          Package: yunzai-rust
+          Version: $VERSION
+          Architecture: $DEB_ARCH
+          Maintainer: xiaocongyu66 <noreply@github.com>
+          Depends: libc6 (>= 2.31)
+          Priority: optional
+          Section: net
+          Homepage: https://github.com/xiaocongyu66/yunzai-rust
+          Description: TRSS-Yunzai v3 重制版 (Rust)
+           Rust 实现的 Yunzai 机器人核心，含 QuickJS 插件引擎。
+          EOF
+          dpkg-deb --build --root-owner-group $PKG dist/deb
+          cp dist/deb/*.deb dist/
+          rm -rf dist/deb
+        env:
+          TARGET: ${{ matrix.target }}
+
+      - name: Stage bundle (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version *= *"(.+)"' |
+                      Select-Object -First 1).Matches[0].Groups[1].Value
+          $short = "${{ matrix.target }}" -replace '-pc-windows.*','' -replace '-unknown.*',''
+          New-Item -ItemType Directory -Force -Path dist/yunzai-$short | Out-Null
+          Copy-Item target/${{ matrix.target }}/release/yunzai.exe dist/yunzai-$short/
+          Copy-Item config/default_config/*.yaml dist/yunzai-$short/ -ErrorAction SilentlyContinue
+          Compress-Archive -Path dist/yunzai-$short -DestinationPath dist/yunzai-$short-$version-windows.zip
+          "SHORT=$short" | Out-File -Append $env:GITHUB_ENV
+          "VERSION=$version" | Out-File -Append $env:GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.target }}
+          path: dist/
+          retention-days: 3
+
+  # 汇总：全部构建成功 → 提交到 bin/
+  commit-binaries:
+    name: Commit to bin/
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download all bundles
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: bundle-*
+
+      - name: Place into bin/
+        run: |
+          rm -rf bin
+          mkdir -p bin
+          # 展开各 bundle：dist/ 下为 tar.gz / deb / zip，统一解到 bin/<target>/
+          for dir in artifacts/bundle-*; do
+            [ -d "$dir" ] || continue
+            target=${dir#artifacts/bundle-}
+            out=bin/$target
+            mkdir -p "$out"
+            find "$dir" -maxdepth 2 -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.deb" \) |
+              while read -r f; do cp "$f" "$out/"; done
+            # 解开裸二进制到顶层，方便直接下载
+            for f in "$out"/*.tar.gz; do
+              [ -f "$f" ] || continue
+              tar -xzf "$f" -C "$out" --strip-components=1
+            done
+          done
+          ls -R bin | head -40
+
+      - name: Commit & push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bin
+          if git diff --cached --quiet; then
+            echo "无产物变更"
+          else
+            git commit -m "ci: 多平台二进制产物 [skip ci] (${GITHUB_SHA::7})"
+            git push origin main
+          fi
