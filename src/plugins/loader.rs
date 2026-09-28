@@ -126,10 +126,13 @@ impl PluginsLoader {
             }
         }
         // 上下文 hook
-        if self.context_hook(&filtered, &e).await {
+        let hook = self.context_hook(&filtered, &e).await;
+        eprintln!("[TRACE] I: context_hook={}", hook);
+        if hook {
             return;
         }
         // only_reply_at 门
+        eprintln!("[TRACE] J: only_reply_at={:?} filtered={}", e.data.get("only_reply_at"), filtered.len());
         if !truthy(&e.get("only_reply_at")) {
             return;
         }
