@@ -597,7 +597,7 @@ impl JsEngine {
                 let g = ctx.globals();
                 let f: rquickjs::Function = g.get(name)?;
                 let v: rquickjs::Value = match list.len() {
-                    0 => f.call(())?,
+                    0 => f.call::<(), rquickjs::Value>(())?,
                     1 => f.call((list[0].clone(),))?,
                     2 => f.call((list[0].clone(), list[1].clone()))?,
                     _ => f.call((list[0].clone(), list[1].clone(), list[2].clone()))?,
@@ -640,14 +640,9 @@ impl JsEngine {
             .ok();
         })
         .await;
-        .await?;
         // 预载运行时（注册 globalThis.plugin/segment/logger/redis/Bot/cfg 等）
-        rquickjs::async_with!(ctx.clone() => |ctx| {
-            let promise = Module::evaluate(ctx.clone(), "yunzai:runtime", shim::RUNTIME)?;
-            let _: rquickjs::Value = promise.into_future().await?;
-            Ok::<_, rquickjs::Error>(())
-        })
-        .await?;
+        ctx.with(|ctx| Module::evaluate(ctx, "yunzai:runtime", shim::RUNTIME))?;
+        rt.idle().await;
         Ok(JsEngine { rt, ctx })
     }
 
@@ -701,7 +696,7 @@ impl JsEngine {
     }
 
     pub async fn accept(&self, reg_key: &str, e_data: &J) -> String {
-        let _ = e_json;
+        let _ = e_data;
         self.run_async("__yz_run_accept", vec![reg_key.to_string()])
             .await
             .unwrap_or_else(|| "null".to_string())
