@@ -170,7 +170,7 @@ async fn onebotv11_e2e() {
     assert!(content.contains("请发送要复读的内容"), "第一条回复错误: {}", content);
 
     // 8. 上下文续接：发送内容 → 复读（等待 groupCD 500ms 过期）
-    tokio::time::sleep(Duration::from_millis(600)).await;
+    tokio::time::sleep(Duration::from_millis(2300)).await;
     write.lock().await.send(Message::Text(send_group("hello yunzai").to_string().into()))
         .await
         .unwrap();
