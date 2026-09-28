@@ -51,6 +51,8 @@ function clone() {
   sed -i "s/\[ 'ADLER32_SIMD_NEON' \]/[]/g" ./node/deps/zlib/zlib.gyp
   sed -i "s/\[ 'DEFLATE_SLIDE_HASH_SSE2' \]/[]/g" ./node/deps/zlib/zlib.gyp
   sed -i "s/'DEFLATE_SLIDE_HASH_NEON',/ /g" ./node/deps/zlib/zlib.gyp
+  sed -i "s/\[ 'INFLATE_CHUNK_SIMD_SSE2' \]/[]/g" ./node/deps/zlib/zlib.gyp
+  sed -i "s/\[ 'INFLATE_CHUNK_SIMD_NEON' \]/[]/g" ./node/deps/zlib/zlib.gyp
 }
 
 function build() {
