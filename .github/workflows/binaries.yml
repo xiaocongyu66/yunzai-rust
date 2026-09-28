@@ -32,9 +32,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build libnode (node source + embedding patch)
-        # linux 脚本内 apt-get 需要 root；macOS runner 自带免密 sudo 也可直接跑
+      # linux 脚本内 apt-get 需要 root；macOS 的 Homebrew 拒绝 root，直接跑
+      - name: Build libnode (linux)
+        if: runner.os == 'Linux'
         run: sudo -E bash libnode/scripts/${{ matrix.script }}
+        env:
+          NODEJS_GIT: https://github.com/nodejs/node
+          NODEJS_BRANCH: v24.5.0
+
+      - name: Build libnode (macos)
+        if: runner.os == 'macOS'
+        run: bash libnode/scripts/${{ matrix.script }}
         env:
           NODEJS_GIT: https://github.com/nodejs/node
           NODEJS_BRANCH: v24.5.0
