@@ -602,7 +602,7 @@ impl JsEngine {
                     2 => f.call::<_, rquickjs::Value>((list[0].clone(), list[1].clone()))?,
                     _ => f.call::<_, rquickjs::Value>((list[0].clone(), list[1].clone(), list[2].clone()))?,
                 };
-                Ok(v.as_string().and_then(|s| s.to_string().ok()))
+                Ok::<_, rquickjs::Error>(v.as_string().and_then(|s| s.to_string().ok()))
             })
             .await
             .ok()
@@ -642,7 +642,7 @@ impl JsEngine {
         .await;
         // 预载运行时（注册 globalThis.plugin/segment/logger/redis/Bot/cfg 等）
         ctx.with(|ctx| {
-            Module::evaluate(ctx, "yunzai:runtime", shim::RUNTIME)?;
+            let _promise = Module::evaluate(ctx, "yunzai:runtime", shim::RUNTIME)?;
             Ok::<_, rquickjs::Error>(())
         })?;
         rt.idle().await;
