@@ -639,10 +639,16 @@ impl JsEngine {
 
     /// 三段式异步调用：清空结果 → 启动 async JS → idle 推进 → 回读 __yz_result
     async fn run_async(&self, runner: &str, args: Vec<String>) -> Option<String> {
+        eprintln!("[DBG-run] 1 clear");
         self.call_js("__yz_clear_result", (Vec::new(),)).await?;
+        eprintln!("[DBG-run] 2 start {}", runner);
         self.call_js(runner, (args,)).await?;
+        eprintln!("[DBG-run] 3 idle");
         self.rt.idle().await;
-        self.call_js("__yz_read_result", (Vec::new(),)).await
+        eprintln!("[DBG-run] 4 read");
+        let r = self.call_js("__yz_read_result", (Vec::new(),)).await;
+        eprintln!("[DBG-run] 5 result = {:?}", r.as_deref().map(|s| &s[..s.len().min(120)]));
+        r
     }
 
     pub async fn new() -> rquickjs::Result<JsEngine> {
@@ -690,7 +696,9 @@ impl JsEngine {
             .run_async("__yz_run_load", vec![path_c, key.to_string()])
             .await
             .unwrap_or_else(|| "null".to_string());
+        eprintln!("[DBG-load] ret = {}", &ret[..ret.len().min(300)]);
         let metas: Vec<J> = serde_json::from_str(&ret).unwrap_or_default();
+        eprintln!("[DBG-load] metas = {}个", metas.len());
         metas
             .into_iter()
             .filter_map(|m| {
