@@ -595,14 +595,12 @@ impl JsEngine {
         self.ctx
             .with(|ctx| {
                 let g = ctx.globals();
-                let f: rquickjs::Function = g.get(name).ok()?;
+                let f: rquickjs::Function = g.get(name)?;
                 let v: rquickjs::Value = match list.len() {
-                    0 => f.call(()).ok()?,
-                    1 => f.call((list[0].clone(),)).ok()?,
-                    2 => f.call((list[0].clone(), list[1].clone())).ok()?,
-                    _ => f
-                        .call((list[0].clone(), list[1].clone(), list[2].clone()))
-                        .ok()?,
+                    0 => f.call(())?,
+                    1 => f.call((list[0].clone(),))?,
+                    2 => f.call((list[0].clone(), list[1].clone()))?,
+                    _ => f.call((list[0].clone(), list[1].clone(), list[2].clone()))?,
                 };
                 Ok(v.as_string().and_then(|s| s.to_string().ok()))
             })
