@@ -33,9 +33,14 @@ function clone() {
 }
 
 function build() {
-  cd ./node  
+  cd ./node
   export CC="gcc"
   export CXX="g++"
+
+  # clang17 (arm64 host 交叉 x64) 对 zlib cpuid.h 的内联 asm 报 invalid constraint
+  # → 定义 CPU_NO_SIMD 跳过运行时 SIMD 检测 (功能不受影响, 仅少 SSE 加速)
+  sed -i.bak '1i\
+#define CPU_NO_SIMD' deps/zlib/cpu_features.c
 
   ./configure \
     --shared \
