@@ -628,11 +628,11 @@ impl JsEngine {
     pub async fn load_plugin(&self, path: &str, key: &str) -> Vec<JsPluginData> {
         let path = PathBuf::from(path).canonicalize().unwrap_or_else(|_| PathBuf::from(path));
         let path = path.to_string_lossy().to_string();
-        let key = key.to_string();
+        let key_c = key.to_string();
         let metas: Vec<J> = rquickjs::async_with!(self.ctx.clone() => |ctx| {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_load_plugin").ok()?;
-                let promise: rquickjs::Promise = f.call((path, key)).ok()?;
+                let promise: rquickjs::Promise = f.call((path, key_c)).ok()?;
                 let ret: String = promise.into_future().await.ok()?;
                 serde_json::from_str(&ret).ok()
             })
@@ -679,10 +679,13 @@ impl JsEngine {
         let fnc = fnc.to_string();
         rquickjs::async_with!(self.ctx.clone() => |ctx| {
                 let g = ctx.globals();
-                let f: rquickjs::Function<'_> = g.get("__yz_call").ok()?;
-                let promise: rquickjs::Promise = f.call((reg_key, fnc)).ok()?;
-                let ret: String = promise.into_future().await.unwrap_or_else(|_| "null".to_string());
-                ret
+                match g.get::<_, rquickjs::Function>("__yz_call") {
+                    Ok(f) => match f.call::<_, (), rquickjs::Promise>((reg_key, fnc)) {
+                        Ok(promise) => promise.into_future().await.unwrap_or_else(|_| "null".to_string()),
+                        Err(_) => "null".to_string(),
+                    },
+                    Err(_) => "null".to_string(),
+                }
             })
             .await
     }
@@ -692,10 +695,13 @@ impl JsEngine {
         let reg_key = reg_key.to_string();
         rquickjs::async_with!(self.ctx.clone() => |ctx| {
                 let g = ctx.globals();
-                let f: rquickjs::Function<'_> = g.get("__yz_accept").ok()?;
-                let promise: rquickjs::Promise = f.call((reg_key,)).ok()?;
-                let ret: String = promise.into_future().await.unwrap_or_else(|_| "null".to_string());
-                ret
+                match g.get::<_, rquickjs::Function>("__yz_accept") {
+                    Ok(f) => match f.call::<_, (), rquickjs::Promise>((reg_key,)) {
+                        Ok(promise) => promise.into_future().await.unwrap_or_else(|_| "null".to_string()),
+                        Err(_) => "null".to_string(),
+                    },
+                    Err(_) => "null".to_string(),
+                }
             })
             .await
     }
@@ -705,10 +711,16 @@ impl JsEngine {
         let msg = msg.to_string();
         rquickjs::async_with!(self.ctx.clone() => |ctx| {
                 let g = ctx.globals();
-                let f: rquickjs::Function<'_> = g.get("__yz_test").ok()?;
-                let promise: rquickjs::Promise = f.call((reg_key, idx, msg)).ok()?;
-                let r: String = promise.into_future().await.unwrap_or_else(|_| "false".to_string());
-                r == "true"
+                match g.get::<_, rquickjs::Function>("__yz_test") {
+                    Ok(f) => match f.call::<_, (), rquickjs::Promise>((reg_key, idx, msg)) {
+                        Ok(promise) => {
+                            let r: String = promise.into_future().await.unwrap_or_else(|_| "false".to_string());
+                            r == "true"
+                        }
+                        Err(_) => false,
+                    },
+                    Err(_) => false,
+                }
             })
             .await
     }
