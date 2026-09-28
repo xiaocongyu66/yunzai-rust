@@ -9,6 +9,12 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
+/// 双轨插件：原生 trait / JS 脚本
+pub enum AnyPlugin {
+    Native(Arc<dyn Plugin>),
+    Js(crate::jsrt::JsPluginData),
+}
+
 pub struct PluginEntry {
     pub key: String,
     pub name: String,
@@ -16,7 +22,7 @@ pub struct PluginEntry {
     pub event: String,
     pub priority: i64,
     pub namespace: String,
-    pub plugin: Arc<dyn Plugin>,
+    pub plugin: AnyPlugin,
 }
 
 pub struct TaskJob {
@@ -30,6 +36,7 @@ pub struct TaskJob {
 pub struct PluginsLoader {
     pub priority: RwLock<Vec<Arc<PluginEntry>>>,
     pub task: RwLock<Vec<TaskJob>>,
+    pub engine: RwLock<Option<Arc<crate::jsrt::JsEngine>>>,
     group_cd: RwLock<HashMap<String, std::time::Instant>>,
     single_cd: RwLock<HashMap<String, std::time::Instant>>,
     msg_throttle: RwLock<HashSet<String>>,
@@ -46,6 +53,7 @@ impl PluginsLoader {
         PluginsLoader {
             priority: RwLock::new(Vec::new()),
             task: RwLock::new(Vec::new()),
+            engine: RwLock::new(None),
             group_cd: RwLock::new(HashMap::new()),
             single_cd: RwLock::new(HashMap::new()),
             msg_throttle: RwLock::new(HashSet::new()),
@@ -66,7 +74,7 @@ impl PluginsLoader {
                 event: plugin.event().to_string(),
                 priority: plugin.priority(),
                 namespace: format!("builtin.{}", plugin.name()),
-                plugin,
+                plugin: AnyPlugin::Native(plugin),
             });
             for t in entry.plugin.tasks() {
                 tasks.push(TaskJob {
@@ -85,11 +93,67 @@ impl PluginsLoader {
             count += 1;
             self.priority.write().unwrap().push(entry);
         }
+        // JS 插件扫描（≈ getPlugins + importPlugin）
+        let engine = match self.engine.read().unwrap().clone() {
+            Some(e) => Some(e),
+            None => match crate::jsrt::JsEngine::new().await {
+                Ok(e) => {
+                    let e = Arc::new(e);
+                    *self.engine.write().unwrap() = Some(e.clone());
+                    Some(e)
+                }
+                Err(err) => {
+                    util::make_log1(Level::Error, Some("Plugin"), format!("JS 引擎初始化失败 {}", err));
+                    None
+                }
+            },
+        };
+        if let Some(engine) = engine {
+            for (rel, abs) in crate::jsrt::scan_plugin_files("plugins") {
+                let datas = engine.load_plugin(&abs, &rel).await;
+                for data in datas {
+                    if data.name.is_empty() {
+                        continue;
+                    }
+                    util::make_log1(
+                        Level::Debug,
+                        Some("Plugin"),
+                        format!("加载插件 [{}][{}]", rel, data.name),
+                    );
+                    count += 1;
+                    self.priority.write().unwrap().push(Arc::new(PluginEntry {
+                        key: rel.clone(),
+                        name: data.name.clone(),
+                        dsc: data.dsc.clone(),
+                        event: data.event.clone(),
+                        priority: data.priority,
+                        namespace: data.reg_key.clone(),
+                        plugin: AnyPlugin::Js(data),
+                    }));
+                }
+            }
+        }
+
         self.priority.write().unwrap().sort_by_key(|e| e.priority);
         util::make_log1(Level::Info, Some("Plugin"), format!("加载定时任务[{}个]", tasks.len()));
         util::make_log1(Level::Info, Some("Plugin"), format!("加载插件[{}个]", count));
         *self.task.write().unwrap() = tasks;
         let _ = bot;
+    }
+
+    /// JS 插件派发：实例化 + 调用，返回 false 表示 handler 返回 false（继续下一条 rule）
+    async fn js_call(
+        &self,
+        engine: &Arc<crate::jsrt::JsEngine>,
+        data: &crate::jsrt::JsPluginData,
+        e: &E,
+        fnc: &str,
+    ) -> bool {
+        crate::jsrt::EventGuard::set(e.bot.clone(), e.data.clone());
+        engine.instantiate(&data.reg_key, &e.data).await;
+        let ret = engine.call(&data.reg_key, fnc, &e.data).await;
+        crate::jsrt::EventGuard::clear();
+        ret != "false"
     }
 
     /// ≈ deal — 消息分发主管线
@@ -136,22 +200,62 @@ impl PluginsLoader {
         }
         // accept 链
         for p in &filtered {
-            let mut pe = with_plugin_name(&e, &p.name);
-            match p.plugin.accept(&mut pe).await {
-                Accept::Return => return,
-                Accept::Break => break,
-                Accept::Next => {}
+            match &p.plugin {
+                AnyPlugin::Native(native) => {
+                    let mut pe = with_plugin_name(&e, &p.name);
+                    match native.accept(&mut pe).await {
+                        Accept::Return => return,
+                        Accept::Break => break,
+                        Accept::Next => {}
+                    }
+                }
+                AnyPlugin::Js(data) => {
+                    if let Some(engine) = self.engine.read().unwrap().clone() {
+                        crate::jsrt::EventGuard::set(e.bot.clone(), e.data.clone());
+                        engine.instantiate(&data.reg_key, &e.data).await;
+                        let r = engine.accept(&data.reg_key, &e.data).await;
+                        crate::jsrt::EventGuard::clear();
+                        if r == "return" {
+                            return;
+                        }
+                        if r == "true" {
+                            break;
+                        }
+                    }
+                }
             }
         }
         // rule 匹配
         for p in &filtered {
-            for rule in p.plugin.rules() {
+            let rules: Vec<crate::jsrt::JsRule> = match &p.plugin {
+                AnyPlugin::Native(native) => native.rules().iter().map(|r| crate::jsrt::JsRule {
+                    reg_src: String::new(),
+                    rust: Some(r.reg.clone()),
+                    fnc: r.fnc.clone(),
+                    log: r.log,
+                    permission: r.permission.clone(),
+                    event: r.event.clone(),
+                }).collect(),
+                AnyPlugin::Js(data) => data.rules.clone(),
+            };
+            for (ri, rule) in rules.iter().enumerate() {
                 if let Some(ev) = &rule.event {
                     if !filt_event(&e.data, ev) {
                         continue;
                     }
                 }
-                if !rule.reg.is_match(&e.msg()) {
+                let matched = match &rule.rust {
+                    Some(re) => re.is_match(&e.msg()),
+                    None => {
+                        // JS RegExp 兜底
+                        if let (AnyPlugin::Js(data), Some(engine)) = (&p.plugin, self.engine.read().unwrap().clone()) {
+                            engine.regex_test(&data.reg_key, ri, &e.msg()).await
+                        } else {
+                            false
+                        }
+                    }
+                };
+                if !matched {
                     continue;
                 }
                 let log_fnc = logger::blue(format!("[{}({})]", p.name, rule.fnc));
@@ -166,10 +270,21 @@ impl PluginsLoader {
                         logger::yellow("[开始处理]")
                     )],
                 );
-                if self.filt_permission(&e, &rule).await {
+                if self.filt_permission(&e, rule).await {
                     let start_time = util::now_ms();
-                    let mut pe = with_plugin_name(&e, &p.name);
-                    let res = p.plugin.handle(&mut pe, &rule.fnc).await;
+                    let res = match &p.plugin {
+                        AnyPlugin::Native(native) => {
+                            let mut pe = with_plugin_name(&e, &p.name);
+                            native.handle(&mut pe, &rule.fnc).await
+                        }
+                        AnyPlugin::Js(data) => {
+                            if let Some(engine) = self.engine.read().unwrap().clone() {
+                                self.js_call(&engine, data, &e, &rule.fnc).await
+                            } else {
+                                false
+                            }
+                        }
+                    };
                     if !res {
                         continue;
                     }
@@ -212,7 +327,16 @@ impl PluginsLoader {
                 if expired_context(&p.name, &pe, &fnc) {
                     continue;
                 }
-                let res = p.plugin.handle(&mut pe, &fnc).await;
+                let res = match &p.plugin {
+                    AnyPlugin::Native(native) => native.handle(&mut pe, &fnc).await,
+                    AnyPlugin::Js(data) => {
+                        if let Some(engine) = self.engine.read().unwrap().clone() {
+                            self.js_call(&engine, data, e, &fnc).await
+                        } else {
+                            false
+                        }
+                    }
+                };
                 if !res {
                     continue; // ≈ 返回 "continue"
                 }
@@ -473,7 +597,7 @@ impl PluginsLoader {
     }
 
     /// ≈ filtPermission — master/owner/admin
-    async fn filt_permission(&self, e: &E, rule: &Rule) -> bool {
+    async fn filt_permission(&self, e: &E, rule: &crate::jsrt::JsRule) -> bool {
         if e.is_master() {
             return true;
         }

@@ -46,6 +46,12 @@ impl RedisHandle {
         use redis::AsyncCommands;
         c.keys(pattern).await.unwrap_or_default()
     }
+
+    pub async fn expire(&self, key: &str, secs: i64) {
+        let mut c = self.conn.clone();
+        use redis::AsyncCommands;
+        let _: Result<i64, _> = c.expire(key, secs).await;
+    }
 }
 
 pub async fn redis_init(cfg: &crate::config::Cfg) -> Option<RedisHandle> {

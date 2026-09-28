@@ -3,6 +3,7 @@ mod adapters;
 mod bot;
 mod config;
 mod events;
+mod jsrt;
 mod listener;
 mod logger;
 mod plugins;
