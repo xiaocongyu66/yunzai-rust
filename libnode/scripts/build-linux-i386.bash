@@ -45,6 +45,10 @@ function clone() {
 
   git config --global safe.directory '*'
   git clone "$NODEJS_GIT" --branch "$NODEJS_BRANCH" --depth=1 ./node
+
+  # 32 位/交叉编译时 gyp 的 CPU 检测失效，zlib SIMD 代码编译崩溃——直接关闭
+  sed -i "s/'defines': \[ 'ADLER32_SIMD_SSSE3' \]/'defines': []/g" ./node/deps/zlib/zlib.gyp
+  sed -i "s/'defines': \[ 'ADLER32_SIMD_NEON' \]/'defines': []/g" ./node/deps/zlib/zlib.gyp
 }
 
 function build() {
