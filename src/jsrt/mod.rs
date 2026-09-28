@@ -680,7 +680,7 @@ impl JsEngine {
         rquickjs::async_with!(self.ctx.clone() => |ctx| {
                 let g = ctx.globals();
                 match g.get::<_, rquickjs::Function>("__yz_call") {
-                    Ok(f) => match f.call::<_, (), rquickjs::Promise>((reg_key, fnc)) {
+                    Ok(f) => match f.call::<_, rquickjs::Promise>((reg_key, fnc)) {
                         Ok(promise) => promise.into_future().await.unwrap_or_else(|_| "null".to_string()),
                         Err(_) => "null".to_string(),
                     },
@@ -696,7 +696,7 @@ impl JsEngine {
         rquickjs::async_with!(self.ctx.clone() => |ctx| {
                 let g = ctx.globals();
                 match g.get::<_, rquickjs::Function>("__yz_accept") {
-                    Ok(f) => match f.call::<_, (), rquickjs::Promise>((reg_key,)) {
+                    Ok(f) => match f.call::<_, rquickjs::Promise>((reg_key,)) {
                         Ok(promise) => promise.into_future().await.unwrap_or_else(|_| "null".to_string()),
                         Err(_) => "null".to_string(),
                     },
@@ -712,7 +712,7 @@ impl JsEngine {
         rquickjs::async_with!(self.ctx.clone() => |ctx| {
                 let g = ctx.globals();
                 match g.get::<_, rquickjs::Function>("__yz_test") {
-                    Ok(f) => match f.call::<_, (), rquickjs::Promise>((reg_key, idx, msg)) {
+                    Ok(f) => match f.call::<_, rquickjs::Promise>((reg_key, idx, msg)) {
                         Ok(promise) => {
                             let r: String = promise.into_future().await.unwrap_or_else(|_| "false".to_string());
                             r == "true"
