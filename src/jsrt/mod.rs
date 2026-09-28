@@ -615,7 +615,7 @@ impl JsEngine {
         })
         .await?;
         // 预载运行时（注册 globalThis.plugin/segment/logger/redis/Bot/cfg 等）
-        ctx.async_with!(ctx => |ctx| {
+        rquickjs::async_with!(ctx => |ctx| {
             let promise = Module::evaluate(ctx.clone(), "yunzai:runtime", shim::RUNTIME)?;
             let _: Value = promise.into_future().await?;
             Ok::<_, rquickjs::Error>(())
@@ -631,7 +631,7 @@ impl JsEngine {
         let key = key.to_string();
         let metas: Vec<J> = self
             .ctx
-            .async_with!(ctx => |ctx| {
+            rquickjs::async_with!(ctx => |ctx| {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_load_plugin").ok()?;
                 let promise: rquickjs::Promise<String> = f.call((path, key)).ok()?;
@@ -666,7 +666,7 @@ impl JsEngine {
         let e_json = serde_json::to_string(e_data).ok()?;
         let reg_key = reg_key.to_string();
         self.ctx
-            .async_with!(ctx => |ctx| {
+            rquickjs::async_with!(ctx => |ctx| {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_instantiate").ok()?;
                 let promise: rquickjs::Promise<String> = f.call((reg_key, e_json)).ok()?;
@@ -681,7 +681,7 @@ impl JsEngine {
         let reg_key = reg_key.to_string();
         let fnc = fnc.to_string();
         self.ctx
-            .async_with!(ctx => |ctx| {
+            rquickjs::async_with!(ctx => |ctx| {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_call").ok()?;
                 let promise: rquickjs::Promise<String> = f.call((reg_key, fnc)).ok()?;
@@ -694,7 +694,7 @@ impl JsEngine {
         let e_json = serde_json::to_string(e_data).unwrap_or_default();
         let reg_key = reg_key.to_string();
         self.ctx
-            .async_with!(ctx => |ctx| {
+            rquickjs::async_with!(ctx => |ctx| {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_accept").ok()?;
                 let promise: rquickjs::Promise<String> = f.call((reg_key,)).ok()?;
@@ -707,7 +707,7 @@ impl JsEngine {
         let reg_key = reg_key.to_string();
         let msg = msg.to_string();
         self.ctx
-            .async_with!(ctx => |ctx| {
+            rquickjs::async_with!(ctx => |ctx| {
                 let g = ctx.globals();
                 let f: rquickjs::Function<'_> = g.get("__yz_test").ok()?;
                 let promise: rquickjs::Promise<String> = f.call((reg_key, idx, msg)).ok()?;
