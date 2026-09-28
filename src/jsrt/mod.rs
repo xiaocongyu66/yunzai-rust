@@ -589,39 +589,33 @@ pub struct JsEngine {
 }
 
 impl JsEngine {
-    /// 同步调用 JS 全局函数，返回字符串结果（无返回值时 None）
-    fn with_fn<A>(&self, name: &str, args: A) -> rquickjs::Result<Option<String>>
-    where
-        A: rquickjs::function::IntoArgs,
-    {
-        self.ctx.with(|ctx| {
-            let g = ctx.globals();
-            let f: rquickjs::Function = g.get(name)?;
-            let v: rquickjs::Value = f.call(args)?;
-            Ok(v.as_string().and_then(|s| s.to_string().ok()))
-        })
-    }
-
-    /// 三段式异步调用：启动 async JS → idle 推进 → 回读 __yz_result
-    async fn run_async<A>(&self, runner: &str, args: A) -> Option<String>
-    where
-        A: rquickjs::function::IntoArgs,
-    {
-        let started = self.ctx.with(|ctx| {
-            let g = ctx.globals();
-            let f: rquickjs::Function = g.get(runner).ok()?;
-            f.call::<A, rquickjs::Value>(args).ok()
-        });
-        started.ok()?;
-        self.rt.idle().await;
+    /// 调用 JS 全局函数（0~3 个字符串参数），返回字符串结果
+    async fn call_js(&self, name: &str, args: (Vec<String>,)) -> Option<String> {
+        let list = args.0;
         self.ctx
             .with(|ctx| {
                 let g = ctx.globals();
-                let v: rquickjs::Value = g.get("__yz_result").ok()?;
-                v.into_string().map(|s| s.to_string()).ok()
+                let f: rquickjs::Function = g.get(name).ok()?;
+                let v: rquickjs::Value = match list.len() {
+                    0 => f.call(()).ok()?,
+                    1 => f.call((list[0].clone(),)).ok()?,
+                    2 => f.call((list[0].clone(), list[1].clone())).ok()?,
+                    _ => f
+                        .call((list[0].clone(), list[1].clone(), list[2].clone()))
+                        .ok()?,
+                };
+                Ok(v.as_string().and_then(|s| s.to_string().ok()))
             })
+            .await
             .ok()
             .flatten()
+    }
+
+    /// 三段式异步调用：启动 async JS → idle 推进 jobs → 回读 __yz_result
+    async fn run_async(&self, runner: &str, args: Vec<String>) -> Option<String> {
+        self.call_js(runner, (args,)).await?;
+        self.rt.idle().await;
+        self.call_js("__yz_read_result", (Vec::new(),)).await
     }
 
     pub async fn new() -> rquickjs::Result<JsEngine> {
@@ -646,8 +640,8 @@ impl JsEngine {
                 }),
             )
             .ok();
-            Ok::<_, rquickjs::Error>(())
         })
+        .await;
         .await?;
         // 预载运行时（注册 globalThis.plugin/segment/logger/redis/Bot/cfg 等）
         rquickjs::async_with!(ctx.clone() => |ctx| {
@@ -664,7 +658,7 @@ impl JsEngine {
         let path = PathBuf::from(path).canonicalize().unwrap_or_else(|_| PathBuf::from(path));
         let path = path.to_string_lossy().to_string();
         let ret = self
-            .run_async("__yz_run_load", (path, key.to_string()))
+            .run_async("__yz_run_load", vec![path, key.to_string()])
             .await
             .unwrap_or_else(|| "null".to_string());
         let metas: Vec<J> = serde_json::from_str(&ret).unwrap_or_default();
@@ -694,22 +688,23 @@ impl JsEngine {
         let e_json = serde_json::to_string(e_data).ok()?;
         let reg_key = reg_key.to_string();
         let ret = self
-            .with_fn("__yz_instantiate", (reg_key, e_json))
-            .ok()
-            .flatten()?;
+            .call_js("__yz_instantiate", (vec![reg_key, e_json],))
+            .await?;
         serde_json::from_str(&ret).ok()
     }
 
     pub async fn call(&self, reg_key: &str, fnc: &str, e_data: &J) -> String {
-        let _ = e_json;
-        self.run_async("__yz_run_call", (reg_key.to_string(), fnc.to_string()))
-            .await
-            .unwrap_or_else(|| "null".to_string())
+        self.run_async(
+            "__yz_run_call",
+            vec![reg_key.to_string(), fnc.to_string()],
+        )
+        .await
+        .unwrap_or_else(|| "null".to_string())
     }
 
     pub async fn accept(&self, reg_key: &str, e_data: &J) -> String {
         let _ = e_json;
-        self.run_async("__yz_run_accept", (reg_key.to_string(),))
+        self.run_async("__yz_run_accept", vec![reg_key.to_string()])
             .await
             .unwrap_or_else(|| "null".to_string())
     }
@@ -718,8 +713,9 @@ impl JsEngine {
         let reg_key = reg_key.to_string();
         let msg = msg.to_string();
         matches!(
-            self.with_fn("__yz_test", (reg_key, idx, msg)),
-            Ok(Some(r)) if r == "true"
+            self.call_js("__yz_test", (vec![reg_key, idx.to_string(), msg],))
+                .await,
+            Some(r) if r == "true"
         )
     }
 }
