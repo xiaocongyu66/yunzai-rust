@@ -41,8 +41,11 @@ function build() {
   cd ./node
   # ARM host 交叉编 x64：CPUID 内联 asm 无法跨架构生成——跳过 zlib 运行时 SIMD 检测
   # （clang17 对 cpuid.h 报 invalid constraint；仅少 SSE 加速，功能不受影响）
-  sed -i.bak '1i\
-#define CPU_NO_SIMD' deps/zlib/cpu_features.c
+  # 覆盖全部 zlib 副本：deps/zlib + deps/v8/third_party/zlib（host 工具链也编它）
+  find ./node/deps -name "cpu_features.c" -path "*zlib*" | while read -r f; do
+    sed -i.bak '1i\
+#define CPU_NO_SIMD' "$f"
+  done
 
   ./configure \
     --shared \
