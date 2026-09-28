@@ -6,7 +6,7 @@ use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
 const PORT: u16 = 25361;
-const SELF_ID: u64 = 114514;
+const SELF_ID: u64 = 10001;
 const USER_ID: u64 = 222;
 const GROUP_ID: u64 = 333;
 
