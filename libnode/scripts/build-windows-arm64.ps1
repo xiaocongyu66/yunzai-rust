@@ -1,9 +1,8 @@
-# windows arm64 — 在 windows runner 上构建 libnode 动态库（需要 VS 的 ARM64 组件）
+# windows arm64 — libnode 动态库构建（需要 runner 的 VS ARM64 组件）
 $ErrorActionPreference = "Stop"
 
 function prepare() {
-  Get-Command clang
-  clang --version
+  Write-Host "prepare: using bundled MSVC ARM64 toolchain"
 }
 
 function clone() {
@@ -20,13 +19,21 @@ function copy-release() {
   if (Test-Path .\release\libnode-windows-arm64) {
     Remove-Item -Recurse -Force .\release\libnode-windows-arm64
   }
-  New-Item -ItemType "Directory" -Force -Path .\release\libnode-windows-arm64
-  Copy-Item -Path .\node\out\Release\libnode.dll -Destination .\release\libnode-windows-arm64 -ErrorAction SilentlyContinue
-  Copy-Item -Path .\node\out\Release\node.exe -Destination .\release\libnode-windows-arm64 -ErrorAction SilentlyContinue
+  New-Item -ItemType "Directory" -Force -Path .\release\libnode-windows-arm64 | Out-Null
+  if (Test-Path .\node\out\Release\libnode.dll) {
+    Copy-Item .\node\out\Release\libnode.dll .\release\libnode-windows-arm64\
+  } elseif (Test-Path .\node\out\Release\node.dll) {
+    Copy-Item .\node\out\Release\node.dll .\release\libnode-windows-arm64\libnode.dll
+  } else {
+    throw "未找到构建产物（libnode.dll / node.dll）"
+  }
+  if (Test-Path .\node\out\Release\node.exe) {
+    Copy-Item .\node\out\Release\node.exe .\release\libnode-windows-arm64\
+  }
+  Get-ChildItem .\release\libnode-windows-arm64\
 }
 
 prepare
 clone
 build
 copy-release
-
