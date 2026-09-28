@@ -44,6 +44,7 @@ export const axios = {
   },
 }
 globalThis.axios = axios
+export default axios
 
 export async function fetch(url, opts = {}) {
   const ret = __yz_op("http", {
@@ -55,6 +56,7 @@ export async function fetch(url, opts = {}) {
   return wrapResponse(ret)
 }
 globalThis.fetch = fetch
+export default fetch
 
 // Buffer（数据以 base64 在桥间传递）
 export const Buffer = {
@@ -67,3 +69,4 @@ export const Buffer = {
   },
 }
 globalThis.Buffer = Buffer
+export default Buffer

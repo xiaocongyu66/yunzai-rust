@@ -81,9 +81,10 @@ struct YzLoader;
 impl Loader for YzLoader {
     fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str) -> rquickjs::Result<Module<'js>> {
         if let Some(rest) = name.strip_prefix("yunzai:") {
+            // 已实现 shim 直接用；未实现的 node 内置模块生成空 stub（默认导出空对象，容错降级）
             let src = match shim_source(rest) {
-                Some(s) => s,
-                None => "",
+                Some(s) => s.to_string(),
+                None => "const stub = {}\nexport default stub\n".to_string(),
             };
             return Module::declare(ctx.clone(), name, src);
         }

@@ -64,6 +64,7 @@ export const fs = {
   },
 }
 globalThis.fs = fs
+export default fs
 
 export const path = {
   join(...parts) {
@@ -84,6 +85,7 @@ export const path = {
   sep: "/",
 }
 globalThis.path = path
+export default path
 
 export const childProcess = {
   exec(cmd, opts, cb) {
@@ -102,6 +104,7 @@ export const childProcess = {
   },
 }
 globalThis.child_process = childProcess
+export default childProcess
 
 export const util = {
   promisify(fn) {
@@ -126,6 +129,7 @@ export const util = {
   },
 }
 globalThis.util = util
+export default util
 
 export const querystring = {
   stringify(obj) {
@@ -143,6 +147,7 @@ export const querystring = {
   },
 }
 globalThis.querystring = querystring
+export default querystring
 
 export const crypto = {
   createHash(algo) {
@@ -162,3 +167,4 @@ export const crypto = {
   },
 }
 globalThis.crypto = crypto
+export default crypto
