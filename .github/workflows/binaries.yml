@@ -21,6 +21,43 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # ===== libnode.so 构建（Node.js 嵌入库，供运行时与 yunzai 二进制配套使用）=====
+  libnode:
+    name: libnode-${{ matrix.out }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, script: build-linux-arm64.bash, out: linux-arm64 }
+          - { os: ubuntu-latest, script: build-linux-amd64.bash, out: linux-x86_64 }
+          - { os: macos-14, script: build-macos-arm64.bash, out: macos-arm64 }
+          - { os: macos-13, script: build-macos-amd64.bash, out: macos-x86_64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build libnode (node source + embedding patch)
+        run: bash libnode/scripts/${{ matrix.script }}
+        env:
+          NODEJS_GIT: https://github.com/nodejs/node
+          NODEJS_BRANCH: v24.5.0
+
+      - name: Stage binary
+        run: |
+          mkdir -p dist
+          cp release/libnode-*/libnode.so dist/libnode-${{ matrix.out }}.so
+          cp release/libnode-*/node dist/libnode-${{ matrix.out }}-node 2>/dev/null || true
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-libnode-${{ matrix.out }}
+          path: dist/
+          retention-days: 3
+
+  # ===== yunzai 主程序 =====
   build:
     name: ${{ matrix.target }}
     strategy:
@@ -100,7 +137,7 @@ jobs:
   # 汇总：全部构建成功 → 提交到 bin/
   commit-binaries:
     name: Commit to bin/
-    needs: build
+    needs: [build, libnode]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
