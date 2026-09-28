@@ -39,6 +39,9 @@ function clone() {
 
 function build() {
   cd ./node
+  # ARM host 交叉编 x64：CPUID 内联 asm 无法跨架构生成，关闭 zlib 的 CPU 特性检测
+  export CFLAGS="-DCPU_NO_SIMD"
+  export CXXFLAGS="-DCPU_NO_SIMD"
   export CC="gcc"
   export CXX="g++"
 
