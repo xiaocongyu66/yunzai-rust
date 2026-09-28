@@ -652,13 +652,11 @@ impl JsEngine {
             Ok::<_, rquickjs::Error>(())
         })
         .await;
-        if let Err(ref e) = started {
-            eprintln!("[DBG] runner {} 启动失败: {:?}", runner, e);
-        }
+        })
+        .await;
         started.ok()?;
         self.rt.idle().await;
-        let ret = self
-            .ctx
+        self.ctx
             .with(|ctx| {
                 let g = ctx.globals();
                 let v: rquickjs::Value = g.get("__yz_result")?;
@@ -666,11 +664,7 @@ impl JsEngine {
             })
             .await
             .ok()
-            .flatten();
-        if ret.is_none() {
-            eprintln!("[DBG] read_result 为 None（非字符串或读取失败）");
-        }
-        ret
+            .flatten()
     }
 
     pub async fn new() -> rquickjs::Result<JsEngine> {

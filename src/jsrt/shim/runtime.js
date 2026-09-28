@@ -8,14 +8,11 @@ import 'yunzai:node-shims'
 import 'yunzai:http'
 import 'yunzai:misc'
 
-__yz_log("mark", "[JSRT] runtime body 开始执行")
-
 const registry = (globalThis.__yz_registry = {})
 
 // 异步结果中转：Rust 端「启动 → idle 推进 → 回读 __yz_result」三段式
 globalThis.__yz_result = null
 globalThis.__yz_run_load = async (path, key) => {
-  __yz_log("mark", "[JSRT] run_load 入口 " + path)
   globalThis.__yz_result = null
   try {
     globalThis.__yz_result = await globalThis.__yz_load_plugin(path, key)
@@ -84,9 +81,7 @@ function buildE(key, eJson) {
 }
 
 globalThis.__yz_load_plugin = async (path, key) => {
-  __yz_log("mark", "[JSRT] load_plugin 动态 import 前 " + path)
   const mod = await import(path)
-  __yz_log("mark", "[JSRT] load_plugin import 完成，exports=" + Object.keys(mod).length)
   const metas = []
   for (const name of Object.keys(mod)) {
     const Cls = mod[name]
