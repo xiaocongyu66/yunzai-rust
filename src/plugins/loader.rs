@@ -184,7 +184,7 @@ impl PluginsLoader {
             }
         }
         // 上下文 hook
-        let hook = self.context_hook(&filtered, &e).await;
+        let hook = self.context_hook(&filtered, &e, engine.clone()).await;
         if hook {
             return;
         }
@@ -319,7 +319,12 @@ impl PluginsLoader {
     }
 
     /// ≈ 上下文 hook — 有待续对话时优先派发；返回 true 表示事件已消费
-    async fn context_hook(&self, filtered: &[Arc<PluginEntry>], e: &E) -> bool {
+    async fn context_hook(
+        &self,
+        filtered: &[Arc<PluginEntry>],
+        e: &E,
+        engine: Option<Arc<crate::jsrt::JsEngine>>,
+    ) -> bool {
         for p in filtered {
             let contexts = collect_context(&p.name, e);
             if contexts.is_empty() {
