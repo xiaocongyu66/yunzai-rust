@@ -17,7 +17,7 @@ globalThis.__yz_run_load = async (path, key) => {
   try {
     globalThis.__yz_result = await globalThis.__yz_load_plugin(path, key)
   } catch (err) {
-    __yz_log("error", "[JSRT] run_load 异常 " + (err && err.stack ? err.stack : String(err)))
+    __yz_log("error", "[JSRT] run_load 异常: " + String(err && err.message !== undefined ? err.message : err).split("\n").join(" | "))
     globalThis.__yz_result = "[]"
   }
 }
