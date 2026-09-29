@@ -1,0 +1,88 @@
+name: BinPack
+
+# 轻量产物入库：从指定 run 下载 artifacts → 每产物单独 xz 单包 → 提交 bin/
+# 不重新编译（配合 binaries.yml 的构建产物使用），手动触发
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'binaries.yml 的 run id（留空则用最近一次成功的）'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: binpack-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve run id
+        id: resolve
+        run: |
+          if [ -n "${{ inputs.run_id }}" ]; then
+            RID=${{ inputs.run_id }}
+          else
+            RID=$(gh run list --repo ${{ github.repository }} --workflow=binaries.yml --status=completed --json databaseId,conclusion --jq '[.[] | select(.conclusion=="success")][0].databaseId' 2>/dev/null | tail -1)
+            if [ -z "$RID" ]; then
+              # 没有全绿的就用最近一次完成且产物在的
+              RID=$(gh run list --repo ${{ github.repository }} --workflow=binaries.yml --status=completed --limit 1 --json databaseId --jq '.[0].databaseId' | tail -1)
+            fi
+          fi
+          echo "run=$RID"
+          echo "rid=$RID" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ steps.resolve.outputs.rid }}
+          path: artifacts
+          pattern: bundle-*
+          github-token: ${{ github.token }}
+
+      - name: Place into bin/
+        run: |
+          rm -rf bin
+          mkdir -p bin
+          # 每个产物单独 xz 压缩成单包（自更新按平台下载对应包解压）
+          find artifacts -type f -name "libnode-*" -exec cp {} bin/ \;
+          cd bin
+          for f in libnode-*.so; do
+            [ -f "$f" ] || continue
+            strip --strip-unneeded "$f" 2>/dev/null || true
+            xz -9 -T0 "$f"
+          done
+          for f in libnode-*.dylib; do
+            [ -f "$f" ] || continue
+            strip -x "$f" 2>/dev/null || true
+            xz -9 -T0 "$f"
+          done
+          for f in libnode-*.dll; do
+            [ -f "$f" ] || continue
+            xz -9 -T0 "$f"
+          done
+          ls -la
+
+      - name: Commit & push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bin
+          if git diff --cached --quiet; then
+            echo "无产物变更"
+          else
+            git commit -m "ci: libnode 产物入库 [skip ci] (run ${{ steps.resolve.outputs.rid }})"
+            git push origin main
+          fi
