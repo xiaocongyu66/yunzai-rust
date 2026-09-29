@@ -784,25 +784,27 @@ async fn server_file(
         }
     }
     let decoded = urlencoding_decode(&name).unwrap_or_else(|| name.clone());
-    let entry = bot.fs.read().unwrap().get(&decoded).cloned();
-    match entry {
-        Some(e) => {
-            // times 递减：减到 0 则取走并删除
-            let drop_it = {
+    // 借读锁取引用（不 clone）；times 到 0 即删
+    let mut remove = false;
+    let out = {
+        let fs = bot.fs.read().unwrap();
+        match fs.get(&decoded) {
+            Some(e) => {
                 let mut t = e.times.lock().unwrap();
                 if let Some(n) = *t {
-                    if n <= 1 { *t = Some(0); true } else { *t = Some(n - 1); false }
-                } else { false }
-            };
-            if drop_it {
-                bot.fs.write().unwrap().remove(&decoded);
+                    if n <= 1 { *t = Some(0); remove = true; } else { *t = Some(n - 1); }
+                }
+                ([(header::CONTENT_TYPE, e.content_type.clone())],
+                 axum::response::IntoResponse::into_response(axum::body::Body::from(e.buffer.as_slice().to_vec())))
+                    .into_response()
             }
-            ([(header::CONTENT_TYPE, e.content_type.clone())],
-             axum::response::IntoResponse::into_response(axum::body::Body::from(e.buffer.as_slice().to_vec())))
-                .into_response()
+            None => axum::http::StatusCode::NOT_FOUND.into_response(),
         }
-        None => axum::http::StatusCode::NOT_FOUND.into_response(),
+    };
+    if remove {
+        bot.fs.write().unwrap().remove(&decoded);
     }
+    out
 }
 
 fn urlencoding_decode(s: &str) -> Option<String> {

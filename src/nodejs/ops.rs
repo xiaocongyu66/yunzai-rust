@@ -204,7 +204,7 @@ pub fn op_sync(name: &str, args: &J) -> J {
                 let base = bot.url.read().unwrap().clone();
                 let mut url = format!("{}/File/{}", base.trim_end_matches('/'), name);
                 // auth query 拼接（与原版一致：cfg.server.auth 全键入 query）
-                if let Value::Object(auth_map) = bot.cfg.get("server").get("auth") {
+                if let J::Object(auth_map) = bot.cfg.get("server").get("auth") {
                     for (k, v) in auth_map {
                         url.push_str(if url.contains('?') { "&" } else { "?" });
                         url.push_str(&k);

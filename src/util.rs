@@ -243,7 +243,6 @@ pub fn loose_eq(a: &Value, b: &Value) -> bool {
 }
 
 /// ≈ Bot.fs[name] — 文件外链缓冲项
-#[derive(Clone)]
 pub struct FileEntry {
     pub buffer: std::sync::Arc<Vec<u8>>,
     pub content_type: String,
