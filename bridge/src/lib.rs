@@ -39,13 +39,19 @@ pub struct BridgeFns {
 struct DefSync<T>(Mutex<T>);
 unsafe impl<T> Sync for DefSync<T> {}
 
+impl<T> DefSync<T> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, T> {
+        self.0.lock().unwrap()
+    }
+}
+
 static HOST: DefSync<Option<*const YzHostFns>> = DefSync(Mutex::new(None));
 /// 异步 op 等待表：id → sender（futures oneshot）
-static PENDING_OP: DefSync<HashMap<u64, futures::channel::oneshot::Sender<String>>> =
-    DefSync(Mutex::new(HashMap::new()));
+static PENDING_OP: once_cell::sync::Lazy<DefSync<HashMap<u64, futures::channel::oneshot::Sender<String>>>> =
+    once_cell::sync::Lazy::new(|| DefSync(Mutex::new(HashMap::new())));
 
 fn host() -> Option<&'static YzHostFns> {
-    HOST.0.lock().ok().and_then(|g| g.as_ref().map(|p| unsafe { &**p }))
+    HOST.lock().ok().and_then(|g| g.as_ref().map(|p| unsafe { &**p }))
 }
 
 thread_local! {
@@ -63,7 +69,7 @@ fn next_def_id() -> u64 {
 /// 指针交换入口：宿主传 YzHostFns，本 addon 返回 BridgeFns
 #[no_mangle]
 pub extern "C" fn yz_init(host_fns: *const YzHostFns) -> *const BridgeFns {
-    if let Ok(mut g) = HOST.0.lock() {
+    if let Ok(mut g) = HOST.lock() {
         *g = Some(host_fns);
     }
     &BRIDGE_FNS
@@ -93,7 +99,7 @@ unsafe extern "C" fn dispatch_cmd(cmd: *const c_char) -> c_int {
 /// 宿主完成异步 op → 唤醒 op_async 的 await
 unsafe extern "C" fn complete_async(id: u64, json: *const c_char) {
     let val = CStr::from_ptr(json).to_string_lossy().into_owned();
-    if let Ok(mut map) = PENDING_OP.0.lock() {
+    if let Ok(mut map) = PENDING_OP.lock() {
         if let Some(tx) = map.remove(&id) {
             let _ = tx.send(val);
         }
@@ -108,7 +114,7 @@ pub fn ready(env: Env, dispatcher: JsFunction) -> Result<()> {
     let _ = env;
     let tsfn: ThreadsafeFunction<String, ErrorStrategy::CalleeHandled> =
         dispatcher.create_threadsafe_function(0, |ctx| {
-            let arg = ctx.env.create_string(&ctx.value)?.into_unknown();
+            let arg = ctx.env.create_string(ctx.value.as_str())?.into_unknown();
             Ok(vec![arg])
         })?;
     CMD_TSFN.with(|cell| {
@@ -143,7 +149,7 @@ pub fn op(name: String, args: String) -> Result<String> {
 pub async fn op_async(name: String, args: String) -> Result<String> {
     let (tx, rx) = futures::channel::oneshot::channel::<String>();
     let id = next_def_id();
-    PENDING_OP.0.lock().unwrap().insert(id, tx);
+    PENDING_OP.lock().insert(id, tx);
     match host() {
         Some(h) => {
             let c_name = match CString::new(name) {
@@ -157,7 +163,7 @@ pub async fn op_async(name: String, args: String) -> Result<String> {
             unsafe { (h.op_async_submit)(id, c_name.as_ptr(), c_args.as_ptr()) };
         }
         None => {
-            if let Ok(mut map) = PENDING_OP.0.lock() {
+            if let Ok(mut map) = PENDING_OP.lock() {
                 if let Some(tx) = map.remove(&id) {
                     let _ = tx.send(r#"{"error":"bridge host not initialized"}"#.to_string());
                 }
