@@ -54,10 +54,10 @@ fn host() -> Option<&'static YzHostFns> {
     HOST.lock().as_ref().map(|p| unsafe { &**p })
 }
 
-thread_local! {
-    static CMD_TSFN: std::cell::OnceCell<ThreadsafeFunction<String, ErrorStrategy::CalleeHandled>> =
-        const { std::cell::OnceCell::new() };
-}
+/// tsfn 在 node JS 线程创建（ready），但 dispatch_cmd 在宿主 tokio 线程调用——必须全局共享
+static CMD_TSFN: once_cell::sync::Lazy<
+    DefSync<Option<ThreadsafeFunction<String, ErrorStrategy::CalleeHandled>>>,
+> = once_cell::sync::Lazy::new(|| DefSync(Mutex::new(None)));
 
 static DEF_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 fn next_def_id() -> u64 {
@@ -84,7 +84,8 @@ static BRIDGE_FNS: BridgeFns = BridgeFns {
 /// 宿主 → tsfn 投递指令
 unsafe extern "C" fn dispatch_cmd(cmd: *const c_char) -> c_int {
     let json = CStr::from_ptr(cmd).to_string_lossy().into_owned();
-    CMD_TSFN.with(|cell| match cell.get() {
+    let guard = CMD_TSFN.lock();
+    match guard.as_ref() {
         Some(tsfn) => {
             let st = tsfn.call(Ok(json), ThreadsafeFunctionCallMode::NonBlocking);
             if st == Status::Ok {
@@ -94,7 +95,7 @@ unsafe extern "C" fn dispatch_cmd(cmd: *const c_char) -> c_int {
             }
         }
         None => -2,
-    })
+    }
 }
 
 /// 宿主完成异步 op → 唤醒 op_async 的 await
@@ -119,9 +120,10 @@ pub fn ready(env: Env, dispatcher: JsFunction) -> Result<()> {
                 Ok(vec![arg])
             },
         )?;
-    CMD_TSFN.with(|cell| {
-        let _ = cell.set(tsfn);
-    });
+    {
+        let mut g = CMD_TSFN.lock();
+        *g = Some(tsfn);
+    }
     match host() {
         Some(h) => {
             unsafe { (h.on_ready)() };
