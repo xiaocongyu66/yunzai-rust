@@ -37,6 +37,10 @@ import re, pathlib
 for p in pathlib.Path('./node/deps').rglob('zlib.gyp'):
     s = p.read_text()
     s = re.sub(r'(ADLER32_SIMD|DEFLATE_SLIDE_HASH|INFLATE_CHUNK_SIMD)_[A-Z0-9_]*', 'INFLATE_CHUNK_GENERIC', s)
+    # x86 专用编译选项（-mssse3 等）在 ARM host 交叉时被 clang 拒绝
+    s = re.sub(r"'-mssse3'\s*,?\s*", '', s)
+    s = re.sub(r"'-msse4\.2'\s*,?\s*", '', s)
+    s = re.sub(r"'-mpclmul'\s*,?\s*", '', s)
     p.write_text(s)
 EOF
 }
