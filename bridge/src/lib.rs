@@ -4,8 +4,8 @@
 //! （主 crate 与本 cdylib 各持一份 rlib 静态区，跨边界状态必须走指针交换）。
 
 use napi::bindgen_prelude::*;
-use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction};
-use napi::{Env, JsDeferred, JsFunction, JsObject, Result};
+use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
+use napi::{Env, JsFunction, Result, Status};
 use napi_derive::napi;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, CStr, CString};
@@ -14,7 +14,7 @@ use std::sync::Mutex;
 /// 宿主注入的函数指针组（Rust 主 crate 提供）
 #[repr(C)]
 pub struct YzHostFns {
-    /// 同步 op：name + argsJson → resultJson（返回值需 host 提供 yz_free 释放？——约定：返回值由 host 内 static 缓冲，node 侧立即拷贝）
+    /// 同步 op：name + argsJson → resultJson（返回值指向宿主进程级缓冲，node 侧立即拷贝）
     pub op: unsafe extern "C" fn(name: *const c_char, args: *const c_char) -> *const c_char,
     /// 异步 op 提交：host 在自己的 tokio 运行时执行，完成后调 yz_complete_async(id, json)
     pub op_async_submit: unsafe extern "C" fn(id: u64, name: *const c_char, args: *const c_char),
@@ -31,19 +31,31 @@ pub struct YzHostFns {
 pub struct BridgeFns {
     /// 宿主 → tsfn 投递 JSON 指令（非阻塞）
     pub dispatch_cmd: unsafe extern "C" fn(cmd: *const c_char) -> c_int,
-    /// 宿主完成异步 op → resolve JS deferred
+    /// 宿主完成异步 op → 唤醒 JS 侧 await
     pub complete_async: unsafe extern "C" fn(id: u64, json: *const c_char),
 }
 
-/// JsDeferred（Send）与裸指针非 Sync，static 需手工包装；访问均经内部 Mutex 串行化
+/// Sender 指针非 Sync，static 手工包装；访问均经内部 Mutex 串行化
 struct DefSync<T>(Mutex<T>);
 unsafe impl<T> Sync for DefSync<T> {}
 
 static HOST: DefSync<Option<*const YzHostFns>> = DefSync(Mutex::new(None));
-static JS_DEFS: DefSync<HashMap<u64, JsDeferred<String, ()>>> = DefSync(Mutex::new(HashMap::new()));
+/// 异步 op 等待表：id → sender（futures oneshot）
+static PENDING_OP: DefSync<HashMap<u64, futures::channel::oneshot::Sender<String>>> =
+    DefSync(Mutex::new(HashMap::new()));
 
 fn host() -> Option<&'static YzHostFns> {
     HOST.0.lock().ok().and_then(|g| g.as_ref().map(|p| unsafe { &**p }))
+}
+
+thread_local! {
+    static CMD_TSFN: std::cell::OnceCell<ThreadsafeFunction<String, ErrorStrategy::CalleeHandled>> =
+        const { std::cell::OnceCell::new() };
+}
+
+static DEF_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+fn next_def_id() -> u64 {
+    DEF_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 // ============================ C ABI（宿主调用） ============================
@@ -51,7 +63,7 @@ fn host() -> Option<&'static YzHostFns> {
 /// 指针交换入口：宿主传 YzHostFns，本 addon 返回 BridgeFns
 #[no_mangle]
 pub extern "C" fn yz_init(host_fns: *const YzHostFns) -> *const BridgeFns {
-    if let Ok(mut g) = HOST.lock() {
+    if let Ok(mut g) = HOST.0.lock() {
         *g = Some(host_fns);
     }
     &BRIDGE_FNS
@@ -66,25 +78,24 @@ static BRIDGE_FNS: BridgeFns = BridgeFns {
 unsafe extern "C" fn dispatch_cmd(cmd: *const c_char) -> c_int {
     let json = CStr::from_ptr(cmd).to_string_lossy().into_owned();
     CMD_TSFN.with(|cell| match cell.get() {
-        Some(tsfn) => match tsfn.call(Ok(json)) {
-            Ok(()) => 0,
-            Err(_) => -1,
-        },
+        Some(tsfn) => {
+            let st = tsfn.call(Ok(json), ThreadsafeFunctionCallMode::NonBlocking);
+            if st == Status::Ok {
+                0
+            } else {
+                -1
+            }
+        }
         None => -2,
     })
 }
 
-thread_local! {
-    static CMD_TSFN: std::cell::OnceCell<ThreadsafeFunction<String, ErrorStrategy::CalleeHandled>> =
-        const { std::cell::OnceCell::new() };
-}
-
-/// 宿主完成异步 op → resolve JS deferred
+/// 宿主完成异步 op → 唤醒 op_async 的 await
 unsafe extern "C" fn complete_async(id: u64, json: *const c_char) {
     let val = CStr::from_ptr(json).to_string_lossy().into_owned();
-    if let Ok(mut map) = JS_DEFS.0.lock() {
-        if let Some(deferred) = map.remove(&id) {
-            deferred.resolve(val);
+    if let Ok(mut map) = PENDING_OP.0.lock() {
+        if let Some(tx) = map.remove(&id) {
+            let _ = tx.send(val);
         }
     }
 }
@@ -97,19 +108,19 @@ pub fn ready(env: Env, dispatcher: JsFunction) -> Result<()> {
     let _ = env;
     let tsfn: ThreadsafeFunction<String, ErrorStrategy::CalleeHandled> =
         dispatcher.create_threadsafe_function(0, |ctx| {
-            // 把 Rust 指令 JSON 作为第一个参数传给 dispatcher
-            let arg = ctx.env.create_string(&ctx.value)?.to_unknown();
+            let arg = ctx.env.create_string(&ctx.value)?.into_unknown();
             Ok(vec![arg])
         })?;
     CMD_TSFN.with(|cell| {
         let _ = cell.set(tsfn);
     });
-    if let Some(h) = host() {
-        unsafe { (h.on_ready)() };
-    } else {
-        return Err(Error::new(Status::GenericFailure, "yz-bridge: host not initialized"));
+    match host() {
+        Some(h) => {
+            unsafe { (h.on_ready)() };
+            Ok(())
+        }
+        None => Err(Error::new(Status::GenericFailure, "yz-bridge: host not initialized")),
     }
-    Ok(())
 }
 
 /// 同步 op（node 线程直调宿主）
@@ -127,32 +138,33 @@ pub fn op(name: String, args: String) -> Result<String> {
     }
 }
 
-/// 异步 op：返回 Promise，宿主 tokio 执行后 resolve
+/// 异步 op：宿主 tokio 执行后 complete_async 唤醒此 await（napi 自动转 Promise）
 #[napi]
-pub fn op_async(env: Env, name: String, args: String) -> Result<JsObject> {
-    let (deferred, promise) = env.create_deferred::<String, ()>()?;
+pub async fn op_async(name: String, args: String) -> Result<String> {
+    let (tx, rx) = futures::channel::oneshot::channel::<String>();
     let id = next_def_id();
-    let fallback;
-    {
-        let mut map = JS_DEFS.0.lock().unwrap();
-        map.insert(id, deferred);
-        fallback = false;
-    }
+    PENDING_OP.0.lock().unwrap().insert(id, tx);
     match host() {
         Some(h) => {
-            let c_name = CString::new(name)?;
-            let c_args = CString::new(args)?;
+            let c_name = match CString::new(name) {
+                Ok(s) => s,
+                Err(e) => return Err(Error::new(Status::GenericFailure, e.to_string())),
+            };
+            let c_args = match CString::new(args) {
+                Ok(s) => s,
+                Err(e) => return Err(Error::new(Status::GenericFailure, e.to_string())),
+            };
             unsafe { (h.op_async_submit)(id, c_name.as_ptr(), c_args.as_ptr()) };
         }
         None => {
-            if let Ok(mut map) = JS_DEFS.0.lock() {
-                if let Some(d) = map.remove(&id) {
-                    d.resolve(r#"{"error":"bridge host not initialized"}"#.to_string());
+            if let Ok(mut map) = PENDING_OP.0.lock() {
+                if let Some(tx) = map.remove(&id) {
+                    let _ = tx.send(r#"{"error":"bridge host not initialized"}"#.to_string());
                 }
             }
         }
     }
-    Ok(promise)
+    rx.await.map_err(|_| Error::new(Status::GenericFailure, "op_async cancelled"))
 }
 
 /// JS dispatcher 执行完成 → 宿主 oneshot 唤醒
@@ -173,9 +185,4 @@ pub fn log(level: i32, msg: String) -> Result<()> {
         unsafe { (h.log)(level, c.as_ptr()) };
     }
     Ok(())
-}
-
-static DEF_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-fn next_def_id() -> u64 {
-    DEF_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
