@@ -78,7 +78,7 @@ impl JsEngine {
         let host_path = manager::cache_dir().join("host.mjs");
         std::fs::write(&host_path, HOST_MJS)?;
         // 生态路径映射：社区插件普遍 `import cfg from "../../lib/config/config.js"`——磁盘写真实模块
-        write_eco_shims(manager::cache_dir().parent().unwrap_or(Path::new(".")), &bridge_path.to_string_lossy())?;
+        write_eco_shims(Path::new("."), &bridge_path.to_string_lossy())?;
 
         let (_, mos, _timeout_s) = node_cfg(cfg.map(|c| &**c));
         embed::start(lib_path, bridge_path, host_path, mos)?;
