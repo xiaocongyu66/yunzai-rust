@@ -149,3 +149,4 @@ async fn run() {
     tokio::signal::ctrl_c().await.ok();
     bot.exit(0).await;
 }
+/* ci: trigger */

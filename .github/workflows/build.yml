@@ -6,6 +6,7 @@ on:
     paths: &paths
       - "src/**"
       - "build.rs"
+      - ".github/workflows/**"
       - "bridge/**"
       - "libnode/**"
       - "tests/**"
