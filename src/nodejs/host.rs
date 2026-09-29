@@ -57,7 +57,8 @@ static RET_SEQ: AtomicU64 = AtomicU64::new(0);
 fn ret_buf_put(s: String) -> *const c_char {
     let idx = (RET_SEQ.fetch_add(1, Ordering::Relaxed) % RET_BUF_COUNT as u64) as usize;
     let mut g = RET_BUF[idx].lock().unwrap();
-    *g = s;
+    // String 无 NUL 终止符，CStr 读取会越界带上旧残留字节——内嵌 NUL 结尾
+    *g = s + "\0";
     g.as_ptr() as *const c_char
 }
 
