@@ -8,7 +8,7 @@ use std::ffi::{c_char, CString};
 use std::path::PathBuf;
 
 /// libnode 动态库句柄（故意泄漏：node 注册 atexit 钩子依赖它存活）
-pub static LIBNODE_LIB: OnceLock<libloading::Library> = OnceLock::new();
+pub static LIBNODE_UNIX: OnceLock<&'static libloading::os::unix::Library> = OnceLock::new();
 static STARTED: OnceLock<()> = OnceLock::new();
 
 /// 启动嵌入（幂等）：返回 Ok(()) 表示已触发启动
@@ -16,9 +16,16 @@ pub fn start(libnode_path: PathBuf, bridge_path: PathBuf, host_path: PathBuf, ma
     if STARTED.get().is_some() {
         return Ok(());
     }
-    let lib = unsafe { libloading::Library::new(&libnode_path) }?;
+    use libloading::os::unix::{Library as UnixLib, RTLD_GLOBAL, RTLD_LAZY, RTLD_NOW};
+    // libnode 以 RTLD_GLOBAL 加载：bridge 的 napi_* 未定义符号必须能解析到它
+    let lib: UnixLib = unsafe { UnixLib::open(Some(&libnode_path), RTLD_LAZY | RTLD_GLOBAL) }?;
+    // bridge.node 手动 dlopen 一次做指针交换；node 侧 require 同路径会得到同一镜像
+    let bridge: UnixLib = unsafe { UnixLib::open(Some(&bridge_path), RTLD_NOW) }?;
     // 指针交换：宿主函数 → bridge，换回 dispatch_cmd/complete_async
-    super::host::exchange_fns(&lib)?;
+    let leaked_bridge: &'static UnixLib = Box::leak(Box::new(bridge));
+    let leaked_lib: &'static UnixLib = Box::leak(Box::new(lib));
+    super::host::exchange_fns(leaked_bridge)?;
+    let _ = LIBNODE_UNIX.set(leaked_lib);
 
     let host_s = host_path.to_string_lossy().into_owned();
     let bridge_s = bridge_path.to_string_lossy().into_owned();
@@ -36,13 +43,12 @@ pub fn start(libnode_path: PathBuf, bridge_path: PathBuf, host_path: PathBuf, ma
     let argc = argv.len() as i32;
 
     STARTED.set(()).ok();
-    let _ = LIBNODE_LIB.set(lib);
 
     std::thread::Builder::new()
         .name("node-main".into())
         .stack_size(16 * 1024 * 1024)
         .spawn(move || {
-            let lib = LIBNODE_LIB.get().expect("libnode");
+            let lib = LIBNODE_UNIX.get().copied().expect("libnode");
             // 裸指针不可跨线程，闭包内从 CString 重建（argv 为 move 所有权）
             let mut argv_ptrs: Vec<*const c_char> = argv.iter().map(|a| a.as_ptr() as *const c_char).collect();
             argv_ptrs.push(std::ptr::null());

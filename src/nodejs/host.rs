@@ -124,8 +124,8 @@ unsafe extern "C" fn log_impl(level: c_int, msg: *const c_char) {
 
 // ============================ 对 embed / 门面的接口 ============================
 
-/// 构造并注册宿主函数组，换回 bridge 函数组（embed::start 中调用）
-pub fn exchange_fns(libnode_lib: &libloading::Library) -> anyhow::Result<()> {
+/// 构造并注册宿主函数组，换回 bridge 函数组（embed::start 中调用；yz_init 在 bridge.node 里）
+pub fn exchange_fns(bridge_lib: &libloading::os::unix::Library) -> anyhow::Result<()> {
     let host_fns: &'static YzHostFns = Box::leak(Box::new(YzHostFns {
         op: op_impl,
         op_async_submit: op_async_submit_impl,
@@ -134,7 +134,7 @@ pub fn exchange_fns(libnode_lib: &libloading::Library) -> anyhow::Result<()> {
         log: log_impl,
     }));
     let init: libloading::Symbol<unsafe extern "C" fn(*const YzHostFns) -> *const BridgeFns> =
-        unsafe { libnode_lib.get(b"yz_init\0") }?;
+        unsafe { bridge_lib.get(b"yz_init\0") }?;
     let bridge_fns: *const BridgeFns = unsafe { init(host_fns as *const YzHostFns) };
     let _ = HOST_FNS.set(host_fns);
     let _ = BRIDGE.set(unsafe { &*bridge_fns });
