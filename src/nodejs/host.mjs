@@ -148,7 +148,12 @@ globalThis.__yz_buildE = buildE
 globalThis.Bot = new Proxy({}, {
   get(_, prop) {
     if (prop === 'then') return undefined
-    if (prop === 'uin' || prop === 'bots' || prop === 'adapter') return op('bot_get', { prop })
+    if (prop === 'uin' || prop === 'bots') return op('bot_get', { prop })
+    if (prop === 'adapter') {
+      const ids = JSON.parse(op('bot_get', { prop: 'bots' }) || '[]')
+      const first = Object.keys(ids)[0]
+      return first ? [first] : []
+    }
     if (prop === 'pickFriend' || prop === 'pickUser') return (id) => ({ sendMsg: async (m) => op('friend_send', { self_id: globalThis.Bot?.uin ?? '', user_id: id, msg: JSON.stringify(m) }) })
     if (prop === 'pickGroup') return (id) => ({ sendMsg: async (m) => op('group_send', { self_id: globalThis.Bot?.uin ?? '', group_id: id, msg: JSON.stringify(m) }) })
     if (prop === 'pickMember') return (gid, uid) => ({ getInfo: async () => op('friend_info', { self_id: globalThis.Bot?.uin ?? '', user_id: uid ?? gid }) })
@@ -210,7 +215,7 @@ async function loadPlugin(absPath, key) {
       try { inst = new Cls() } catch { continue }
       let skip = false
       if (typeof inst.init === 'function') {
-        try { if ((await inst.init()) === 'return') skip = true } catch (e) { log(3, `${key}.${name} init 异常: ${e?.message ?? e}`); skip = true }
+        try { if ((await inst.init()) === 'return') skip = true } catch (e) { log(3, `${key}.${name} init 异常: ${e?.stack || e?.message || e}`); skip = true }
       }
       if (skip) continue
       const regKey = `${key}::${name}`
@@ -224,7 +229,7 @@ async function loadPlugin(absPath, key) {
         event: String(inst.event ?? 'message'), priority: Number(inst.priority ?? 5000), rules, tasks, _plugin: String(inst.name ?? name) })
     }
   } catch (e) {
-    log(3, `插件加载失败 ${key}: ${e?.message ?? e}`)
+    log(3, `插件加载失败 ${key}: ${e?.stack || e?.message || e}`)
   }
   return metas
 }
