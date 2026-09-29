@@ -180,6 +180,23 @@ globalThis.cfg = new Proxy({}, {
   },
 })
 
+globalThis.plugin = class plugin {
+  constructor(data = {}) {
+    this.name = data.name
+    this.dsc = data.dsc || ''
+    this.event = data.event || 'message'
+    this.priority = data.priority ?? 5000
+    this.task = data.task || []
+    this.rule = data.rule || []
+    this.e = null
+    this.self_id = null
+    this.user_id = null
+    this.group_id = null
+  }
+  async init() { return null }
+  async accept() { return null }
+}
+
 // ============ registry + dispatcher ============
 const registry = new Map()
 
