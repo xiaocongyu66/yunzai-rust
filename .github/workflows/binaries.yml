@@ -76,7 +76,8 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           mkdir -p dist
-          cp release/libnode-*/libnode.so dist/libnode-${{ matrix.out }}.so
+          cp release/libnode-*/libnode.so dist/libnode-${{ matrix.out }}.so 2>/dev/null \
+            || cp release/libnode-*/libnode.dylib dist/libnode-${{ matrix.out }}.dylib
           cp release/libnode-*/node dist/libnode-${{ matrix.out }}-node 2>/dev/null || true
           ls -la dist/
 

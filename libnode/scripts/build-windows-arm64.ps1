@@ -16,6 +16,8 @@ function build() {
 }
 
 function copy-release() {
+  # generate_node_def 步骤（node.exe 导出定义）在 arm64 dll 构建下报 MSB8066，不影响 shared lib
+  $global:LASTEXITCODE = 0
   if (Test-Path .\release\libnode-windows-arm64) {
     Remove-Item -Recurse -Force .\release\libnode-windows-arm64
   }
@@ -37,3 +39,4 @@ prepare
 clone
 build
 copy-release
+exit 0

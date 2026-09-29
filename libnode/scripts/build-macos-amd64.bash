@@ -53,7 +53,8 @@ EOF
   ./configure \
     --shared \
     --dest-cpu x64 \
-    --dest-os mac
+    --dest-os mac \
+    --openssl-no-asm
 
   make -j8
   cd ../

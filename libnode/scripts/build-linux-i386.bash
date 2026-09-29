@@ -52,6 +52,10 @@ function clone() {
   find ./node/deps -name "zlib.gyp" | while read -r f; do
     sed -i "s/\(ADLER32_SIMD\|DEFLATE_SLIDE_HASH\|INFLATE_CHUNK_SIMD\)_[A-Z0-9_]*/INFLATE_CHUNK_GENERIC/g" "$f"
   done
+  # cpu_features 的 __cpuid 检测块在 embedtest 链接时缺符号——全部副本关闭
+  find ./node/deps -name "cpu_features.c" -path "*zlib*" | while read -r f; do
+    sed -i '1i #define CPU_NO_SIMD' "$f"
+  done
 }
 
 function build() {
