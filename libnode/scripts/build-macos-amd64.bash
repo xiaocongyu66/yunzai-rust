@@ -53,7 +53,8 @@ function build() {
   # CPUID 内联 asm 跨架构不可生成——全部 zlib 副本（deps/zlib + V8 副本）跳过运行时 SIMD 检测
   python3 - <<'EOF'
 import pathlib
-for p in pathlib.Path('./node/deps').rglob('cpu_features.c'):
+# cwd 为 node/ 源码根（build 已 cd），全库递归
+for p in pathlib.Path('.').rglob('cpu_features.c'):
     body = p.read_text()
     body = body.replace('#elif defined(ADLER32_SIMD_SSSE3)', '#elif 0')
     p.write_text('#define CPU_NO_SIMD\n' + body)
