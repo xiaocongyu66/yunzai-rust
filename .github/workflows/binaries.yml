@@ -118,9 +118,23 @@ jobs:
         run: |
           rm -rf bin
           mkdir -p bin
-          # 直接平铺裸二进制：artifacts/bundle-*/libnode-* → bin/
+          # 平铺裸二进制：artifacts/bundle-*/libnode-* → bin/
           find artifacts -type f -name "libnode-*" -exec cp {} bin/ \;
-          ls -la bin/
+          # GitHub 文件硬限 100MB：超限的 .so 先 strip，仍超则单文件 xz（自更新时解压）
+          cd bin
+          for f in libnode-*.so; do
+            [ -f "$f" ] || continue
+            size=$(stat -c%s "$f")
+            if [ "$size" -gt 94371840 ]; then
+              strip --strip-unneeded "$f" 2>/dev/null || true
+              [ $(stat -c%s "$f") -gt 94371840 ] && { xz -9 -T0 "$f"; }
+            fi
+          done
+          for f in libnode-*.dll; do
+            [ -f "$f" ] || continue
+            [ $(stat -c%s "$f") -gt 94371840 ] && xz -9 -T0 "$f"
+          done
+          ls -la
 
       - name: Commit & push
         run: |
