@@ -51,7 +51,7 @@ static PENDING_OP: once_cell::sync::Lazy<DefSync<HashMap<u64, futures::channel::
     once_cell::sync::Lazy::new(|| DefSync(Mutex::new(HashMap::new())));
 
 fn host() -> Option<&'static YzHostFns> {
-    HOST.lock().ok().and_then(|g| g.as_ref().map(|p| unsafe { &**p }))
+    HOST.lock().as_ref().map(|p| unsafe { &**p })
 }
 
 thread_local! {
@@ -69,7 +69,8 @@ fn next_def_id() -> u64 {
 /// 指针交换入口：宿主传 YzHostFns，本 addon 返回 BridgeFns
 #[no_mangle]
 pub extern "C" fn yz_init(host_fns: *const YzHostFns) -> *const BridgeFns {
-    if let Ok(mut g) = HOST.lock() {
+    {
+        let mut g = HOST.lock();
         *g = Some(host_fns);
     }
     &BRIDGE_FNS
@@ -99,10 +100,8 @@ unsafe extern "C" fn dispatch_cmd(cmd: *const c_char) -> c_int {
 /// 宿主完成异步 op → 唤醒 op_async 的 await
 unsafe extern "C" fn complete_async(id: u64, json: *const c_char) {
     let val = CStr::from_ptr(json).to_string_lossy().into_owned();
-    if let Ok(mut map) = PENDING_OP.lock() {
-        if let Some(tx) = map.remove(&id) {
-            let _ = tx.send(val);
-        }
+    if let Some(tx) = PENDING_OP.lock().remove(&id) {
+        let _ = tx.send(val);
     }
 }
 
@@ -113,10 +112,13 @@ unsafe extern "C" fn complete_async(id: u64, json: *const c_char) {
 pub fn ready(env: Env, dispatcher: JsFunction) -> Result<()> {
     let _ = env;
     let tsfn: ThreadsafeFunction<String, ErrorStrategy::CalleeHandled> =
-        dispatcher.create_threadsafe_function(0, |ctx| {
-            let arg = ctx.env.create_string(ctx.value.as_str())?.into_unknown();
-            Ok(vec![arg])
-        })?;
+        dispatcher.create_threadsafe_function(
+            0,
+            |ctx: napi::threadsafe_function::ThreadsafeCallContext<String>| -> Result<Vec<JsUnknown>> {
+                let arg = ctx.env.create_string(ctx.value.as_str())?.into_unknown();
+                Ok(vec![arg])
+            },
+        )?;
     CMD_TSFN.with(|cell| {
         let _ = cell.set(tsfn);
     });
@@ -163,10 +165,8 @@ pub async fn op_async(name: String, args: String) -> Result<String> {
             unsafe { (h.op_async_submit)(id, c_name.as_ptr(), c_args.as_ptr()) };
         }
         None => {
-            if let Ok(mut map) = PENDING_OP.lock() {
-                if let Some(tx) = map.remove(&id) {
-                    let _ = tx.send(r#"{"error":"bridge host not initialized"}"#.to_string());
-                }
+            if let Some(tx) = PENDING_OP.lock().remove(&id) {
+                let _ = tx.send(r#"{"error":"bridge host not initialized"}"#.to_string());
             }
         }
     }
