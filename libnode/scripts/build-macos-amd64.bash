@@ -47,6 +47,9 @@ EOF
 
 function build() {
   cd ./node
+  # ARM host 交叉编 x64：显式 -arch（V8 裸 asm 需 x64 汇编器，configure 不会自动加）
+  export CC="clang -arch x86_64"
+  export CXX="clang++ -arch x86_64"
   # CPUID 内联 asm 跨架构不可生成——全部 zlib 副本（deps/zlib + V8 副本）跳过运行时 SIMD 检测
   python3 - <<'EOF'
 import pathlib
