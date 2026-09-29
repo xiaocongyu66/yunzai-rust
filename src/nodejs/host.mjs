@@ -149,6 +149,8 @@ globalThis.Bot = new Proxy({}, {
   get(_, prop) {
     if (prop === 'then') return undefined
     if (prop === 'uin' || prop === 'bots') return op('bot_get', { prop })
+    if (prop === 'express') return __yzExpress
+    if (prop === 'server') return __yzServer
     if (prop === 'adapter') {
       const ids = JSON.parse(op('bot_get', { prop: 'bots' }) || '[]')
       const first = Object.keys(ids)[0]
@@ -189,6 +191,20 @@ globalThis.cfg = new Proxy({}, {
     return op('cfg_get', { name: String(prop) })
   },
 })
+
+// ============ Bot.express / Bot.server（guoba 等插件挂载面） ============
+// 主端口由 Rust(axum) 持有，express 以独立端口挂载（guoba_port，默认 5099）
+let __yzExpress = null, __yzServer = null
+try {
+  const express = (await import('express')).default
+  const guobaPort = Number(cfg?.server?.guoba_port) || 5099
+  __yzExpress = express()
+  __yzExpress.quiet = []
+  __yzExpress.skip_auth = []
+  __yzServer = __yzExpress.listen(guobaPort, () => log(2, `[express] 插件服务已挂载 http://localhost:${guobaPort}`))
+} catch (e) {
+  log(3, `[express] 初始化失败 ${e?.message ?? e}`)
+}
 
 globalThis.plugin = class plugin {
   constructor(data = {}) {
