@@ -114,7 +114,7 @@ pub fn ready(env: Env, dispatcher: JsFunction) -> Result<()> {
     let tsfn: ThreadsafeFunction<String, ErrorStrategy::CalleeHandled> =
         dispatcher.create_threadsafe_function(
             0,
-            |ctx: napi::threadsafe_function::ThreadSafeCallContext<String>| -> Result<Vec<JsUnknown>> {
+            |ctx: napi::threadsafe_function::ThreadSafeCallContext<String>| -> Result<Vec<napi::JsUnknown>> {
                 let arg = ctx.env.create_string(ctx.value.as_str())?.into_unknown();
                 Ok(vec![arg])
             },
