@@ -47,7 +47,7 @@ jobs:
           # 先单独编 bridge 拿 napi 桥，供主程序编译期内嵌
           cargo build -p yz-bridge --release --target ${{ matrix.target }}
           BRIDGE=$(ls target/${{ matrix.target }}/release/ | grep -E '^libyz_bridge\.(so|dylib)$' | head -1 || true)
-          [ -n "$BRIDGE" ] && echo "YZ_BRIDGE_BIN=${{ github.workspace }}/target/${{ matrix.target }}/release/$BRIDGE" >> $GITHUB_ENV
+          [ -n "$BRIDGE" ] && echo "YZ_BRIDGE_BIN=$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/$BRIDGE" >> $GITHUB_ENV
           cargo build --workspace --release --target ${{ matrix.target }}
 
       - name: Stage bridge addon (yz_bridge.node)

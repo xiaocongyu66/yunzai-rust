@@ -14,7 +14,7 @@ fn main() {
                 println!("cargo:rerun-if-changed={}", src.display());
                 return;
             }
-            panic!("YZ_BRIDGE_BIN 指向的文件不存在: {src}");
+            panic!("YZ_BRIDGE_BIN 指向的文件不存在: {}", src.display());
         }
     }
     // 本地开发兜底：空占位（运行时回退发行包 lib/ 文件）
