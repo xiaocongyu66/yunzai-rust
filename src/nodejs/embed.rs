@@ -32,10 +32,15 @@ pub fn start(libnode_path: PathBuf, bridge_path: PathBuf, host_path: PathBuf, ma
         .unwrap_or(host_path.clone())
         .to_string_lossy()
         .into_owned();
-    let bridge_s = std::fs::canonicalize(&bridge_path)
-        .unwrap_or(bridge_path.clone())
-        .to_string_lossy()
-        .into_owned();
+    // /proc/self/fd/*（memfd 内存桥）必须保持原路径，canonicalize 会替换成 memfd 假名
+    let bridge_s = if bridge_path.starts_with("/proc/self/fd") {
+        bridge_path.to_string_lossy().into_owned()
+    } else {
+        std::fs::canonicalize(&bridge_path)
+            .unwrap_or(bridge_path.clone())
+            .to_string_lossy()
+            .into_owned()
+    };
     let mos = format!("--max-old-space-size={max_old_space}");
 
     // argv：[0]程序名 + V8 标志 + 入口脚本 + bridge 路径（host.mjs 从 argv[1] 读）

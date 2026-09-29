@@ -30,6 +30,34 @@ fn node_cfg(cfg: Option<&crate::config::Cfg>) -> (bool, u32, u64) {
     (autodl, mos, timeout)
 }
 
+/// 编译期内嵌的 napi 桥（build.rs 从 YZ_BRIDGE_BIN 拷入 OUT_DIR；本地开发为空占位）
+pub const EMBED_BRIDGE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/yz_bridge.node"));
+
+/// 编译期内嵌的 napi 桥（build.rs 从 YZ_BRIDGE_BIN 拷入 OUT_DIR；本地开发为空占位）
+pub const EMBED_BRIDGE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/yz_bridge.node"));
+
+/// memfd 内存直载内嵌桥 → 返回 /proc/self/fd/<n> 路径（不落盘；fd 随进程生命周期）
+#[cfg(unix)]
+fn load_embedded_bridge_in_memory() -> anyhow::Result<PathBuf> {
+    use std::io::Write;
+    use std::os::fd::FromRawFd;
+    const AT_FDCWD: i32 = -100;
+    extern "C" {
+        fn memfd_create(name: *const u8, flags: u32) -> i32;
+    }
+    // MFD_CLOEXEC = 0x0001；名字仅用于 /proc 展示
+    let fd = unsafe { memfd_create(b"yz_bridge.node\0".as_ptr(), 0x0001) };
+    if fd < 0 {
+        anyhow::bail!("memfd_create 失败（内核 <3.17？）");
+    }
+    let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+    file.write_all(EMBED_BRIDGE)?;
+    file.flush()?;
+    std::mem::forget(file); // fd 保活至进程退出（node require 与 dlopen 都要读它）
+    let _ = AT_FDCWD;
+    Ok(PathBuf::from(format!("/proc/self/fd/{fd}")))
+}
+
 pub struct JsEngine;
 
 impl JsEngine {
@@ -40,17 +68,19 @@ impl JsEngine {
         // bridge.node / host.mjs 运行时文件（先建缓存目录，tempdir 场景不预置）
         let _ = std::fs::create_dir_all(manager::cache_dir());
         let bridge_path = manager::cache_dir().join("yz_bridge.node");
-        if let Some(bundled) = find_bundled_bridge() {
+        if EMBED_BRIDGE.len() > 0 {
+            std::fs::write(&bridge_path, EMBED_BRIDGE).map_err(|e| anyhow::anyhow!("写出内嵌 bridge 失败: {e}"))?;
+        } else if let Some(bundled) = find_bundled_bridge() {
             std::fs::copy(&bundled, &bridge_path).map_err(|e| anyhow::anyhow!("拷贝 bridge 失败: {e}"))?;
         } else {
             return Err(anyhow::anyhow!(
-                "yz_bridge.node 不存在（随发行包附带的 napi 桥缺失）。可从发行包 lib/ 目录恢复"
+                "yz_bridge.node 缺失（内嵌为空且发行包 lib/ 无此文件）"
             ));
         }
         let host_path = manager::cache_dir().join("host.mjs");
         std::fs::write(&host_path, HOST_MJS)?;
         // 生态路径映射：社区插件普遍 `import cfg from "../../lib/config/config.js"`——磁盘写真实模块
-        write_eco_shims(manager::cache_dir().parent().unwrap_or(Path::new(".")))?;
+        write_eco_shims(manager::cache_dir().parent().unwrap_or(Path::new(".")), &bridge_path.to_string_lossy())?;
 
         let (_, mos, _timeout_s) = node_cfg(cfg.map(|c| &**c));
         embed::start(lib_path, bridge_path, host_path, mos)?;
@@ -235,14 +265,14 @@ use std::sync::Mutex;
 /// 内嵌 host.mjs
 pub const HOST_MJS: &str = include_str!("host.mjs");
 
-/// 写生态映射模块（lib/config/config.js 等；bridge 路径经 YZ_BRIDGE_PATH env）
-fn write_eco_shims(root: &Path) -> anyhow::Result<()> {
+/// 写生态映射模块（lib/config/config.js 等；bridge 路径字面量化，兼容 memfd fd 路径）
+fn write_eco_shims(root: &Path, bridge: &str) -> anyhow::Result<()> {
     let cfg_dir = root.join("lib/config");
     std::fs::create_dir_all(&cfg_dir)?;
     let cfg_js = r#"// 生态映射：TRSS-Yunzai 的 cfg 门面（经 yz-bridge 与 Rust 主进程通信）
 import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
-const bridge = require(process.env.YZ_BRIDGE_PATH || 'yz_bridge.node')
+const bridge = require({bridge})
 const parse = (s) => { try { return JSON.parse(s) } catch { return null } }
 const cfgProxy = new Proxy({}, {
   get(_, prop) {
@@ -257,7 +287,8 @@ const cfgProxy = new Proxy({}, {
 export default cfgProxy
 export { cfgProxy as config, cfgProxy as cfg }
 "#;
-    std::fs::write(cfg_dir.join("config.js"), cfg_js)?;
+    let bridge_lit = format!("\"{}\"", bridge.replace('\\', "\\\\"));
+    std::fs::write(cfg_dir.join("config.js"), cfg_js.replace("{bridge}", &bridge_lit))?;
     let plg_dir = root.join("lib/plugins");
     std::fs::create_dir_all(&plg_dir)?;
     std::fs::write(plg_dir.join("plugin.js"), "export default globalThis.plugin
