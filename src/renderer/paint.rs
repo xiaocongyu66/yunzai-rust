@@ -144,7 +144,7 @@ fn parse_stops(parts: &[String]) -> Vec<(f32, [u8; 4])> {
     // 均匀分布无位置色标
     if out.len() >= 2 {
         let n = out.len();
-        let all_auto = out.iter().enumerate().all(|(i, (p, _))| **p == f32::MAX || (i == n - 1 && **p == f32::MAX));
+        let all_auto = out.iter().enumerate().all(|(i, (p, _))| **p == f32::MAX || (i == n - 1 && *p == f32::MAX));
         if all_auto {
             let step = 1.0 / (n as f32 - 1.0);
             for (i, e) in out.iter_mut().enumerate() {
@@ -168,8 +168,7 @@ fn linear_shader(deg: f32, stops: &[(f32, [u8; 4])], w: f32, h: f32) -> Option<S
     let cy = h / 2.0;
     let start = Point::from_xy(cx - dx * half, cy - dy * half);
     let end = Point::from_xy(cx + dx * half, cy + dy * half);
-    let g = LinearGradient::new(start, end, grad_stops(stops), SpreadMode::Pad, Transform::identity())?;
-    Some(Shader::LinearGradient(g))
+    LinearGradient::new(start, end, grad_stops(stops), SpreadMode::Pad, Transform::identity())
 }
 
 fn grad_stops(stops: &[(f32, [u8; 4])]) -> Vec<GradientStop> {
@@ -220,19 +219,20 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
                 if let (Some(fg), Some(lg)) = (stops.first(), stops.last()) {
                     let center = Point::from_xy(n.x + n.w / 2.0, n.y + n.h / 2.0);
                     let radius = n.w.min(n.h).max(1.0) / 2.0;
-                    let g = RadialGradient::new(
+                    if let Some(g) = RadialGradient::new(
                         center,
                         Point::from_xy(center.x + 1.0, center.y),
                         radius,
                         grad_stops(&[(0.0, fg.1), (1.0, lg.1)]),
                         SpreadMode::Pad,
                         Transform::identity(),
-                    );
-                    let path = rounded_rect_path(n.x, n.y, n.w, n.h, radius);
-                    let mut p = Paint::default();
-                    p.shader = g;
-                    p.anti_alias = true;
-                    pixmap.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
+                    ) {
+                        let path = rounded_rect_path(n.x, n.y, n.w, n.h, radius);
+                        let mut p = Paint::default();
+                        p.shader = g;
+                        p.anti_alias = true;
+                        pixmap.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
+                    }
                 }
             }
             Some(Bg::Image(path)) => {
