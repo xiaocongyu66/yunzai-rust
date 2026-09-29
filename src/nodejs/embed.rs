@@ -27,8 +27,15 @@ pub fn start(libnode_path: PathBuf, bridge_path: PathBuf, host_path: PathBuf, ma
     super::host::exchange_fns(leaked_bridge)?;
     let _ = LIBNODE_UNIX.set(leaked_lib);
 
-    let host_s = host_path.to_string_lossy().into_owned();
-    let bridge_s = bridge_path.to_string_lossy().into_owned();
+    // require 相对 host.mjs 解析而非 CWD，必须绝对路径
+    let host_s = std::fs::canonicalize(&host_path)
+        .unwrap_or(host_path.clone())
+        .to_string_lossy()
+        .into_owned();
+    let bridge_s = std::fs::canonicalize(&bridge_path)
+        .unwrap_or(bridge_path.clone())
+        .to_string_lossy()
+        .into_owned();
     let mos = format!("--max-old-space-size={max_old_space}");
 
     // argv：[0]程序名 + V8 标志 + 入口脚本 + bridge 路径（host.mjs 从 argv[1] 读）
