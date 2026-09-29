@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths: &paths
       - "src/**"
+      - "build.rs"
       - "bridge/**"
       - "libnode/**"
       - "tests/**"
