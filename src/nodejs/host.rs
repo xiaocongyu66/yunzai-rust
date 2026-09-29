@@ -157,15 +157,15 @@ pub fn dispatch_cmd(cmd: &J) -> bool {
 pub async fn call_js(cmd: J, timeout: Duration) -> Option<String> {
     let id = SEQ.fetch_add(1, Ordering::Relaxed);
     let (tx, rx) = oneshot::channel();
+    let mut cmd = cmd;
+    if let Some(obj) = cmd.as_object_mut() {
+        obj.insert("__id".into(), json!(id));
+    }
     {
         let mut p = PENDING.lock().unwrap();
         if p.len() >= 512 {
             crate::util::make_log1(crate::logger::Level::Warn, Some("Node"), "指令队列积压(512)，拒绝新指令".to_string());
             return None;
-        }
-        let mut cmd = cmd;
-        if let Some(obj) = cmd.as_object_mut() {
-            obj.insert("__id".into(), json!(id));
         }
         p.insert(id, tx);
     }

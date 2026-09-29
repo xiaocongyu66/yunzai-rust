@@ -3,7 +3,9 @@
 //! 字段：分 时 日 月 周（支持 `*/n`、`n-m`、列表、`*`）
 //! ≈ node-schedule 的 `scheduleJob({rule: cron}, fnc)` 语义（loader.task 消费点）
 
+use chrono::{Datelike, Timelike};
 use once_cell::sync::Lazy;
+use std::sync::Mutex;
 
 fn parse_field(field: &str, min: u32, max: u32) -> Option<Vec<u32>> {
     let mut set = std::collections::BTreeSet::new();
@@ -94,11 +96,11 @@ pub fn tick(exprs: &[String]) -> Vec<String> {
 }
 
 /// 调度循环：每 30s 扫描任务表，cron 命中即调 JS 插件方法
-pub async fn spawn_scheduler(loader: std::sync::Arc<super::PluginsLoader>) {
+pub async fn spawn_scheduler(loader: std::sync::Arc<crate::plugins::loader::PluginsLoader>) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-            let jobs: Vec<super::TaskJob> = loader.task.read().unwrap().clone();
+            let jobs: Vec<crate::plugins::loader::TaskJob> = loader.task.read().unwrap().clone();
             if jobs.is_empty() {
                 continue;
             }
