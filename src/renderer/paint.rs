@@ -144,7 +144,7 @@ fn parse_stops(parts: &[String]) -> Vec<(f32, [u8; 4])> {
     // 均匀分布无位置色标
     if out.len() >= 2 {
         let n = out.len();
-        let all_auto = out.iter().enumerate().all(|(i, (p, _))| **p == f32::MAX || (i == n - 1 && *p == f32::MAX));
+        let all_auto = out.iter().enumerate().all(|(i, (p, _))| *p == f32::MAX || (i == n - 1 && *p == f32::MAX));
         if all_auto {
             let step = 1.0 / (n as f32 - 1.0);
             for (i, e) in out.iter_mut().enumerate() {
