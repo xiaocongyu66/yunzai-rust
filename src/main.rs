@@ -8,6 +8,7 @@ mod listener;
 mod logger;
 mod nodejs;
 mod plugins;
+mod renderer;
 mod segment;
 mod util;
 

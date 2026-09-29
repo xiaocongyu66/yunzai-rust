@@ -1,0 +1,134 @@
+//! html5ever → StyleNode 树 + `<style>` 块提取
+
+use html5ever::{parse_document, LocalName, QualName};
+use markup5ever_rcdom::{Handle, NodeData, RcDom};
+use std::collections::BTreeMap;
+
+#[derive(Debug, Default, Clone)]
+pub struct StyleNode {
+    pub tag: String,
+    pub id: Option<String>,
+    pub classes: Vec<String>,
+    /// 合并后的声明（inline 优先）
+    pub decls: BTreeMap<String, String>,
+    /// 文本叶子节点的内容
+    pub text: String,
+    pub children: Vec<StyleNode>,
+    /// 图片源（img src，渲染期解析）
+    pub src: Option<String>,
+}
+
+impl StyleNode {
+    pub fn decl(&self, name: &str) -> Option<&str> {
+        self.decls.get(name).map(String::as_str)
+    }
+}
+
+pub struct CssRule {
+    pub selector: Vec<SelectorPart>,
+    pub decls: BTreeMap<String, String>,
+    pub specificity: u32,
+}
+
+/// 选择器单段（如 `.a .b > span` → 三段）
+#[derive(Debug, Clone, PartialEq)]
+pub enum SelectorPart {
+    Tag(String),
+    Class(String),
+    Id(String),
+    /// 后代关系分隔（空格）
+    Descendant,
+    /// 子代关系分隔（>）
+    Child,
+}
+
+pub fn parse(html: &str) -> Result<(StyleNode, Vec<CssRule>), String> {
+    let dom: RcDom = parse_document(RcDom::default(), Default::default())
+        .from_utf8()
+        .read_from(&mut html.as_bytes())
+        .map_err(|e| e.to_string())?;
+
+    let mut rules = vec![];
+    let mut styles = String::new();
+    walk(&dom.document, &mut |h| {
+        if let NodeData::Element { name, .. } = &h.data {
+            if name.local == LocalName::from("style") {
+                collect_text(h, &mut styles);
+                styles.push('\n');
+            }
+        }
+    });
+
+    rules = crate::renderer::css::parse_stylesheet(&styles);
+
+    let mut root = build(&dom.document);
+    // 取 body（没有则用整个树）
+    if root.children.len() == 1 {
+        root = root.children.remove(0);
+    } else if let Some(idx) = root.children.iter().position(|c| c.tag == "body") {
+        root = root.children.remove(idx);
+    }
+    Ok((root, rules))
+}
+
+fn walk(h: &Handle, f: &mut impl FnMut(&Handle)) {
+    f(h);
+    for c in h.children.borrow().iter() {
+        walk(c, f);
+    }
+}
+
+fn collect_text(h: &Handle, out: &mut String) {
+    for c in h.children.borrow().iter() {
+        if let NodeData::Text { contents } = &c.data {
+            out.push_str(&contents.borrow());
+        }
+    }
+}
+
+fn tag_name(h: &Handle) -> String {
+    match &h.data {
+        NodeData::Element { name, .. } => name.local.to_string(),
+        NodeData::Document => "#document".into(),
+        NodeData::Text { .. } => "#text".into(),
+        NodeData::Comment { .. } => "#comment".into(),
+        _ => "#other".into(),
+    }
+}
+
+fn build(h: &Handle) -> StyleNode {
+    let mut node = StyleNode { tag: tag_name(h), ..Default::default() };
+
+    if let NodeData::Element { name, attrs, .. } = &h.data {
+        node.tag = name.local.to_string();
+        for a in attrs.borrow().iter() {
+            let k = a.name.local.to_string();
+            let v = a.value.to_string();
+            match k.as_str() {
+                "id" => node.id = Some(v),
+                "class" => node.classes = v.split_whitespace().map(String::from).collect(),
+                "style" => {
+                    for (dk, dv) in crate::renderer::css::parse_declarations(&v) {
+                        node.decls.insert(dk, dv);
+                    }
+                }
+                "src" => node.src = Some(v),
+                _ => {}
+            }
+        }
+    }
+
+    // 文本聚合：元素内直接文本
+    let mut direct = String::new();
+    for c in h.children.borrow().iter() {
+        match &c.data {
+            NodeData::Text { contents } => direct.push_str(&contents.borrow()),
+            _ => node.children.push(build(c)),
+        }
+    }
+    node.text = direct.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    // 过滤注释/头
+    node.children.retain(|c| c.tag != "#comment" && c.tag != "head");
+    node
+}
