@@ -234,6 +234,13 @@ pub const HOST_MJS: &str = include_str!("host.mjs");
 
 /// 在二进制旁/发行包 lib/ 下找随包 bridge
 fn find_bundled_bridge() -> Option<PathBuf> {
+    // 环境变量直接指定（测试/特殊部署场景）
+    if let Ok(p) = std::env::var("YZ_BRIDGE_PATH") {
+        let path = PathBuf::from(p);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
     let exe = std::env::current_exe().ok()?;
     let candidates = [
         exe.parent()?.join("lib").join("yz_bridge.node"),
