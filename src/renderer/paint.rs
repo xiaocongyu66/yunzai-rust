@@ -290,7 +290,7 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
     let base_x = (n.x + dx).round();
     let base_y = n.y.round();
 
-    buffer.draw(fonts, &mut fonts.swash, |gx, gy, gw, gh, color| {
+    buffer.draw(fonts, &mut fonts.swash, cosmic_text_color(color_of(n)), |gx, gy, gw, gh, color| {
         // 回调给的是设备像素矩形 + 颜色（alpha 已混合）
         let px = (base_x as i32) + gx;
         let py = (base_y as i32) + gy;
@@ -331,6 +331,10 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
     });
 }
 
+fn cosmic_text_color(c: [u8; 4]) -> cosmic_text::Color {
+    cosmic_text::Color::rgba(c[0], c[1], c[2], c[3])
+}
+
 fn font_size_of(n: &PaintNode) -> f32 {
     n.decls.get("font-size").and_then(|v| v.trim().trim_end_matches("px").parse().ok()).unwrap_or(16.0)
 }
@@ -365,16 +369,8 @@ fn draw_image(pixmap: &mut Pixmap, path: &str, x: f32, y: f32, w: f32, h: f32, _
         Some(p) => p,
         None => return,
     };
-    let scaled = pix.resize(w as u32, h as u32, tiny_skia::ResizeQuality::Bilinear);
-    if let Some(s) = scaled {
-        pix = s;
-    }
-    pixmap.draw_pixmap(
-        0,
-        0,
-        pix.as_ref(),
-        &PixmapPaint::default(),
-        Transform::from_translate(x, y),
-        None,
-    );
+    let sx = if iw > 0 { w / iw as f32 } else { 1.0 };
+    let sy = if ih > 0 { h / ih as f32 } else { 1.0 };
+    let tr = Transform::from_translate(x, y).post_scale(sx, sy);
+    pixmap.draw_pixmap(0, 0, pix.as_ref(), &PixmapPaint::default(), tr, None);
 }

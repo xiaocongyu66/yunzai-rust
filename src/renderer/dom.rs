@@ -1,6 +1,7 @@
 //! html5ever → StyleNode 树 + `<style>` 块提取
 
 use html5ever::{parse_document, LocalName, QualName};
+use tendril::TendrilSink;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use std::collections::BTreeMap;
 
@@ -24,6 +25,7 @@ impl StyleNode {
     }
 }
 
+#[derive(Clone)]
 pub struct CssRule {
     pub selector: Vec<SelectorPart>,
     pub decls: BTreeMap<String, String>,
@@ -45,8 +47,7 @@ pub enum SelectorPart {
 pub fn parse(html: &str) -> Result<(StyleNode, Vec<CssRule>), String> {
     let dom: RcDom = parse_document(RcDom::default(), Default::default())
         .from_utf8()
-        .read_from(&mut html.as_bytes())
-        .map_err(|e| e.to_string())?;
+        .one(html.as_bytes());
 
     let mut rules = vec![];
     let mut styles = String::new();

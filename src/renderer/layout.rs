@@ -43,7 +43,7 @@ pub fn dim(v: &str, basis: f32) -> Dimension {
         return Dimension::Auto;
     }
     if let Some(p) = v.strip_suffix('%') {
-        return p.trim().parse::<f32>().map(|n| length(basis * n / 100.0)).unwrap_or(Dimension::Auto);
+        return p.trim().parse::<f32>().map(|n| Dimension::Percent(n / 100.0)).unwrap_or(Dimension::Auto);
     }
     let n = v.trim().trim_end_matches("px").trim();
     if let Ok(f) = n.parse::<f32>() {
@@ -55,8 +55,8 @@ pub fn dim(v: &str, basis: f32) -> Dimension {
 fn lp(v: &str, basis: f32) -> LengthPercentage {
     match dim(v, basis) {
         Dimension::Length(l) => LengthPercentage::Length(l),
-        Dimension::Percent(p) => LengthPercentage::Percent(p.value / 100.0),
-        _ => LengthPercentage::length(0.0),
+        Dimension::Percent(p) => LengthPercentage::Percent(p),
+        _ => LengthPercentage::Length(0.0),
     }
 }
 
@@ -224,7 +224,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine) -> Resul
             let (tw, th) = fonts.measure(&n.text, font_size, weight, color, maxw, lh);
             let id = taffy
                 .new_leaf(Style {
-                    size: Size { width: Dimension::length(tw), height: Dimension::length(th) },
+                    size: Size { width: Dimension::Length(tw), height: Dimension::Length(th) },
                     ..st
                 })
                 .map_err(|e| e.to_string())?;
@@ -242,7 +242,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine) -> Resul
             let (tw, th) = fonts.measure(&n.text, font_size, weight, color, None, lh);
             let id = taffy
                 .new_leaf(Style {
-                    size: Size { width: Dimension::length(tw), height: Dimension::length(th) },
+                    size: Size { width: Dimension::Length(tw), height: Dimension::Length(th) },
                     ..Default::default()
                 })
                 .map_err(|e| e.to_string())?;

@@ -1,6 +1,6 @@
 //! cosmic-text 封装：字体系统、文本测量、字形光栅化
 
-use cosmic_text::{AttrList, Attrs, Buffer, Color, Family, FontSystem, Metrics, SwashCache, Weight};
+use cosmic_text::{Attrs, AttrsList, Buffer, Color, Family, FontSystem, Metrics, SwashCache, Weight};
 
 pub struct TextEngine {
     pub font_system: FontSystem,
@@ -16,19 +16,19 @@ impl TextEngine {
             let p = std::path::Path::new(dir);
             if p.is_dir() {
                 if let Err(e) = fs.db_mut().load_font_dir(p) {
-                    crate::logger::warn("Renderer", &format!("字体目录加载部分失败 {dir}: {e}"));
+                    crate::util::make_log1(crate::logger::Level::Warn, Some("Renderer"), format!("字体目录加载部分失败 {dir}: {e}"));
                 }
                 loaded += fs.db().faces().count();
             } else if p.is_file() {
                 if let Ok(data) = std::fs::read(p) {
                     if let Err(e) = fs.db_mut().load_font_data(data) {
-                        crate::logger::warn("Renderer", &format!("字体文件加载失败 {dir}: {e}"));
+                        crate::util::make_log1(crate::logger::Level::Warn, Some("Renderer"), format!("字体文件加载失败 {dir}: {e}"));
                     }
                     loaded += 1;
                 }
             }
         }
-        crate::logger::info("Renderer", &format!("字体系统就绪（额外字体 {loaded}）"));
+        crate::util::make_log1(crate::logger::Level::Info, Some("Renderer"), format!("字体系统就绪（额外字体 {loaded}）"));
         Ok(TextEngine { font_system: fs, swash: SwashCache::new() })
     }
 
@@ -48,12 +48,10 @@ impl TextEngine {
             .family(Family::SansSerif)
             .weight(Weight(weight))
             .color(Color::rgba(color[0], color[1], color[2], color[3]));
-        let mut attrs_list = AttrList::new();
-        attrs_list.defaults_mut().family(Family::SansSerif).weight(Weight(weight)).color(Color::rgba(color[0], color[1], color[2], color[3]));
         buffer.set_rich_text(
             &mut self.font_system,
-            [(text, &attrs)],
-            &attrs_list,
+            [(text, attrs)],
+            attrs,
             cosmic_text::Shaping::Advanced,
         );
         if let Some(w) = max_width {
@@ -93,12 +91,10 @@ pub fn layout_buffer(
     let mut buffer = Buffer::new(&mut engine.font_system, metrics);
     let color = Color::rgba(color[0], color[1], color[2], color[3]);
     let attrs = Attrs::new().family(Family::SansSerif).weight(Weight(weight)).color(color);
-    let mut attrs_list = AttrList::new();
-    attrs_list.defaults_mut().family(Family::SansSerif).weight(Weight(weight)).color(color);
     buffer.set_rich_text(
         &mut engine.font_system,
-        [(text, &attrs)],
-        &attrs_list,
+        [(text, attrs)],
+        attrs,
         cosmic_text::Shaping::Advanced,
     );
     if let Some(w) = max_width {
