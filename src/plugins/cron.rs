@@ -182,9 +182,11 @@ pub fn spawn_watcher(loader: std::sync::Arc<crate::plugins::loader::PluginsLoade
                     return;
                 }
             };
-            if watcher.watch(plugins_dir, RecursiveMode::Recursive).is_err() {
+            if let Err(e) = watcher.watch(plugins_dir, RecursiveMode::Recursive) {
+                crate::util::make_log1(crate::logger::Level::Warn, Some("Plugin"), format!("plugins/ 监听启动失败 {e}"));
                 return;
             }
+            crate::util::make_log1(crate::logger::Level::Info, Some("Plugin"), "插件热重载监听已启动 (plugins/)".to_string());
             // 主循环：收到事件就进 debounce 攒批，5s 无新事件才 flush
             let mut pending: std::collections::HashMap<std::path::PathBuf, notify::EventKind> = std::collections::HashMap::new();
             let mut last = std::time::Instant::now();
