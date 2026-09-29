@@ -37,7 +37,8 @@ impl JsEngine {
     pub async fn new() -> anyhow::Result<JsEngine> {
         let cfg = crate::GLOBAL_CFG.get();
         let (lib_path, _fresh) = manager::ensure_libnode(cfg.map(|c| &**c)).await?;
-        // bridge.node / host.mjs 运行时文件
+        // bridge.node / host.mjs 运行时文件（先建缓存目录，tempdir 场景不预置）
+        let _ = std::fs::create_dir_all(manager::cache_dir());
         let bridge_path = manager::cache_dir().join("yz_bridge.node");
         if let Some(bundled) = find_bundled_bridge() {
             std::fs::copy(&bundled, &bridge_path).map_err(|e| anyhow::anyhow!("拷贝 bridge 失败: {e}"))?;
