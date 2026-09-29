@@ -15,15 +15,11 @@ impl TextEngine {
         for dir in extra_dirs {
             let p = std::path::Path::new(dir);
             if p.is_dir() {
-                if let Err(e) = fs.db_mut().load_font_dir(p) {
-                    crate::util::make_log1(crate::logger::Level::Warn, Some("Renderer"), format!("字体目录加载部分失败 {dir}: {e}"));
-                }
-                loaded += fs.db().faces().count();
+                fs.db_mut().load_fonts_dir(p);
+                loaded += 1;
             } else if p.is_file() {
                 if let Ok(data) = std::fs::read(p) {
-                    if let Err(e) = fs.db_mut().load_font_data(data) {
-                        crate::util::make_log1(crate::logger::Level::Warn, Some("Renderer"), format!("字体文件加载失败 {dir}: {e}"));
-                    }
+                    fs.db_mut().load_font_data(data);
                     loaded += 1;
                 }
             }

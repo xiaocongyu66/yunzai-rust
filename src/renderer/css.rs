@@ -36,7 +36,7 @@ pub fn parse_stylesheet(css: &str) -> Vec<CssRule> {
                             continue;
                         }
                         let (parts, spec) = compile_selector(sel);
-                        rules.push(CssRule { selector: parts, decls: decls.clone(), specificity: spec });
+                        rules.push(CssRule { selector: parts, decls: decls.iter().cloned().collect(), specificity: spec });
                     }
                     buf.clear();
                     sel_part.clear();

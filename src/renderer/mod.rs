@@ -22,15 +22,15 @@ pub fn render(html: &str, width: u32, font_dirs: &[String]) -> Result<Vec<u8>, S
     let styled = css::apply_styles(root_node, &rules);
 
     // 2. 字体系统
-    let fonts = text::FontSystem::load(font_dirs)?;
+    let mut fonts = text::TextEngine::load(font_dirs)?;
 
-    // 3. 布局（先按宽度约束算内容高度）
-    let tree = layout::build_tree(&styled, width, &fonts)?;
-    let (_, total_h) = layout::compute(&tree, width, f32::MAX)?;
+    // 3. 布局（按宽度约束算内容高度）
+    let tree = layout::build_tree(&styled, width, &mut fonts)?;
+    let (root_paint, total_h) = layout::compute(tree, width)?;
     let height = (total_h.ceil() as u32).clamp(1, 4096);
 
     // 4. 光栅化
-    paint::paint(&tree, width, height as f32, &fonts)
+    paint::paint(&root_paint, width, height as f32, &mut fonts)
 }
 
 /// op 层入口：JSON 参数 { html, width?, fontDirs? } → { data: base64, width, height }

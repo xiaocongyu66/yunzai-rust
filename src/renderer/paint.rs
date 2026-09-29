@@ -61,7 +61,7 @@ fn rounded_rect_path(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
     let (x, y) = (x as f32, y as f32);
     if r <= 0.01 {
         pb.push_rect(Rect::from_xywh(x, y, w, h));
-        return pb.finish().unwrap();
+        return pb.finish().unwrap_or_else(|| Path::from_rect(Rect::from_xywh(x, y, w, h)));
     }
     pb.move_to(x + r, y);
     pb.line_to(x + w - r, y);
@@ -73,7 +73,7 @@ fn rounded_rect_path(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
     pb.line_to(x, y + r);
     pb.cubic_to(x, y + r * 0.55, x + r * 0.55, y, x + r, y);
     pb.close();
-    pb.finish().unwrap_or_else(|| PathBuilder::from_rect(Rect::from_xywh(x, y, w, h)).finish().unwrap())
+    pb.finish().unwrap_or_else(|| Path::from_rect(Rect::from_xywh(x, y, w, h)))
 }
 
 /// 解析 background：纯色 / linear-gradient(...) / radial-gradient(...)
@@ -158,7 +158,7 @@ fn linear_shader(deg: f32, stops: &[(f32, [u8; 4])], w: f32, h: f32) -> Option<S
     let cy = h / 2.0;
     let start = Point::from_xy(cx - dx * half, cy - dy * half);
     let end = Point::from_xy(cx + dx * half, cy + dy * half);
-    let g = LinearGradient::new(start, end, grad_stops(stops), SpreadMethod::Pad, Transform::identity())?;
+    let g = LinearGradient::new(start, end, grad_stops(stops), SpreadMode::Pad, Transform::identity())?;
     Some(Shader::LinearGradient(g))
 }
 
@@ -212,7 +212,7 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
                         Point::from_xy(n.x + n.w / 2.0, n.y + n.h / 2.0),
                         n.w.min(n.h).max(1.0) / 2.0,
                         grad_stops(&[(0.0, fg.1), (1.0, lg.1)]),
-                        SpreadMethod::Pad,
+                        SpreadMode::Pad,
                         Transform::identity(),
                     );
                     let path = rounded_rect_path(n.x, n.y, n.w, n.h, radius);
@@ -253,9 +253,8 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
         let mut p = Paint::default();
         p.set_color_rgba8(bc[0], bc[1], bc[2], bc[3]);
         p.anti_alias = true;
-        p.stroke_width = bw;
-        p.stroke = true;
-        pixmap.stroke_path(&path, &p, Stroke { width: bw, ..Stroke::default() }, Transform::identity(), None);
+        let stroke = Stroke { width: bw, ..Stroke::default() };
+        pixmap.stroke_path(&path, &p, &stroke, Transform::identity(), None);
     }
 
     // 文本

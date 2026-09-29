@@ -20,6 +20,7 @@ pub struct PaintNode {
 }
 
 /// taffy 节点上下文（所有节点）：样式声明 + 文本信息
+#[derive(Clone)]
 pub struct NodeCtx {
     pub decls: BTreeMap<String, String>,
     pub text: String,
@@ -50,6 +51,17 @@ pub fn dim(v: &str, basis: f32) -> Dimension {
         return length(f);
     }
     Dimension::Auto
+}
+
+fn lpa(v: &str, basis: f32) -> LengthPercentageAuto {
+    let v = v.trim();
+    if v == "auto" || v.is_empty() {
+        return LengthPercentageAuto::Auto;
+    }
+    match lp(v, basis) {
+        LengthPercentage::Length(l) => LengthPercentageAuto::Length(l),
+        LengthPercentage::Percent(p) => LengthPercentageAuto::Percent(p),
+    }
 }
 
 fn lp(v: &str, basis: f32) -> LengthPercentage {
@@ -138,10 +150,10 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
             left: lp(&pl, width),
         },
         margin: Rect {
-            top: lp(&mt, width),
-            right: lp(&mr, width),
-            bottom: lp(&mb, width),
-            left: lp(&ml, width),
+            top: lp(&mt, width).into(),
+            right: lp(&mr, width).into(),
+            bottom: lp(&mb, width).into(),
+            left: lp(&ml, width).into(),
         },
         size: Size {
             width: dim(d("width").as_deref().unwrap_or("auto"), width),
@@ -162,10 +174,10 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
             _ => Position::Relative,
         },
         inset: Rect {
-            top: dim(d("top").as_deref().unwrap_or("auto"), width),
-            right: dim(d("right").as_deref().unwrap_or("auto"), width),
-            bottom: dim(d("bottom").as_deref().unwrap_or("auto"), width),
-            left: dim(d("left").as_deref().unwrap_or("auto"), width),
+            top: lpa(d("top").as_deref().unwrap_or("auto"), width),
+            right: lpa(d("right").as_deref().unwrap_or("auto"), width),
+            bottom: lpa(d("bottom").as_deref().unwrap_or("auto"), width),
+            left: lpa(d("left").as_deref().unwrap_or("auto"), width),
         },
         ..Default::default()
     }
