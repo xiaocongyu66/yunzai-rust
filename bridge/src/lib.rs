@@ -4,7 +4,9 @@
 //! （主 crate 与本 cdylib 各持一份 rlib 静态区，跨边界状态必须走指针交换）。
 
 use napi::bindgen_prelude::*;
+use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction};
 use napi::{Env, JsDeferred, JsFunction, JsObject, Result};
+use napi_derive::napi;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, CStr, CString};
 use std::sync::Mutex;
@@ -33,11 +35,15 @@ pub struct BridgeFns {
     pub complete_async: unsafe extern "C" fn(id: u64, json: *const c_char),
 }
 
-static HOST: Mutex<Option<*const YzHostFns>> = Mutex::new(None);
-static JS_DEFS: Mutex<Option<HashMap<u64, JsDeferred<String>>>> = Mutex::new(None);
+/// JsDeferred（Send）与裸指针非 Sync，static 需手工包装；访问均经内部 Mutex 串行化
+struct DefSync<T>(Mutex<T>);
+unsafe impl<T> Sync for DefSync<T> {}
+
+static HOST: DefSync<Option<*const YzHostFns>> = DefSync(Mutex::new(None));
+static JS_DEFS: DefSync<HashMap<u64, JsDeferred<String, ()>>> = DefSync(Mutex::new(HashMap::new()));
 
 fn host() -> Option<&'static YzHostFns> {
-    HOST.lock().ok().and_then(|g| g.as_ref().map(|p| unsafe { &**p }))
+    HOST.0.lock().ok().and_then(|g| g.as_ref().map(|p| unsafe { &**p }))
 }
 
 // ============================ C ABI（宿主调用） ============================
@@ -76,11 +82,9 @@ thread_local! {
 /// 宿主完成异步 op → resolve JS deferred
 unsafe extern "C" fn complete_async(id: u64, json: *const c_char) {
     let val = CStr::from_ptr(json).to_string_lossy().into_owned();
-    if let Ok(mut g) = JS_DEFS.lock() {
-        if let Some(map) = g.as_mut() {
-            if let Some(deferred) = map.remove(&id) {
-                deferred.resolve(val);
-            }
+    if let Ok(mut map) = JS_DEFS.0.lock() {
+        if let Some(deferred) = map.remove(&id) {
+            deferred.resolve(val);
         }
     }
 }
@@ -128,9 +132,11 @@ pub fn op(name: String, args: String) -> Result<String> {
 pub fn op_async(env: Env, name: String, args: String) -> Result<JsObject> {
     let (deferred, promise) = env.create_deferred::<String, ()>()?;
     let id = next_def_id();
-    if let Ok(mut g) = JS_DEFS.lock() {
-        let map = g.get_or_insert_with(HashMap::new);
+    let fallback;
+    {
+        let mut map = JS_DEFS.0.lock().unwrap();
         map.insert(id, deferred);
+        fallback = false;
     }
     match host() {
         Some(h) => {
@@ -139,11 +145,9 @@ pub fn op_async(env: Env, name: String, args: String) -> Result<JsObject> {
             unsafe { (h.op_async_submit)(id, c_name.as_ptr(), c_args.as_ptr()) };
         }
         None => {
-            if let Ok(mut g) = JS_DEFS.lock() {
-                if let Some(map) = g.as_mut() {
-                    if let Some(d) = map.remove(&id) {
-                        d.resolve(r#"{"error":"bridge host not initialized"}"#.to_string());
-                    }
+            if let Ok(mut map) = JS_DEFS.0.lock() {
+                if let Some(d) = map.remove(&id) {
+                    d.resolve(r#"{"error":"bridge host not initialized"}"#.to_string());
                 }
             }
         }
