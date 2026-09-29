@@ -73,10 +73,11 @@ async fn onebotv11_e2e() {
     )
     .unwrap();
 
-    // 2. 启动主程序（无 Redis、无 TTY）
+    // 2. 启动主程序（无 Redis、无 TTY；LIBNODE_SKIP=1 —— E2E 测协议层，JS 引擎不参与，避免自动下载阻塞适配器注册）
     let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_yunzai"))
         .current_dir(dir.path())
         .env("YZ_NO_REDIS", "1")
+        .env("LIBNODE_SKIP", "1")
         .stdout(std::fs::File::create("/tmp/e2e-child.log").unwrap())
         .stderr(std::fs::File::create("/tmp/e2e-child-err.log").unwrap())
         .spawn()
