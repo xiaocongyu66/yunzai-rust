@@ -3,9 +3,10 @@ mod adapters;
 mod bot;
 mod config;
 mod events;
-mod jsrt;
+// mod jsrt; // 已由 nodejs（dlopen libnode）取代
 mod listener;
 mod logger;
+mod nodejs;
 mod plugins;
 mod segment;
 mod util;

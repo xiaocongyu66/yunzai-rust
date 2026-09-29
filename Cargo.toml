@@ -6,6 +6,9 @@ description = "TRSS-Yunzai rewritten in Rust"
 authors = ["xiaocongyu66"]
 license = "GPL-3.0"
 
+[workspace]
+members = [".", "bridge"]
+
 [features]
 default = []
 deno = []
@@ -24,10 +27,13 @@ chrono = "0.4"
 ulid = "1"
 once_cell = "1"
 base64 = "0.22"
-rquickjs = { version = "0.8", features = ["full-async", "parallel"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 md-5 = "0.10"
 sha2 = "0.10"
+libloading = "0.8"
+lzma-rs = "0.3"
+futures-util = "0.3"
+anyhow = "1"
 
 [dev-dependencies]
 tokio-tungstenite = "0.24"

@@ -224,7 +224,7 @@ pub static VERSION: Lazy<String> = Lazy::new(|| format!("v{}", env!("CARGO_PKG_V
 
 impl Bot {
     pub fn new(cfg: Arc<Cfg>) -> Arc<Bot> {
-        Arc::new(Bot {
+        let bot = Arc::new(Bot {
             cfg,
             stat: AtomicU8::new(0),
             start_time: util::now_ms() as f64 / 1000.0,
@@ -238,7 +238,11 @@ impl Bot {
             bus: RwLock::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             next_conn: AtomicU64::new(1),
-        })
+        });
+        // JS 桥的 Bot 门面句柄（旧实现从未 set 导致 bot 类 op 空转——本次修复）
+        let _ = crate::nodejs::GLOBAL_BOT.set(bot.clone());
+        let _ = crate::nodejs::ops::GLOBAL_BOT.set(bot.clone());
+        bot
     }
 
     // ============ 事件总线（≈ EventEmitter + em 层级事件） ============
@@ -580,6 +584,8 @@ impl Bot {
         {
             let loader = Arc::new(crate::plugins::loader::PluginsLoader::new());
             loader.load(self).await;
+            // cron 定时任务调度（JS 插件 task 元数据消费点）
+            crate::plugins::cron::spawn_scheduler(loader.clone()).await;
             *self.loader.write().unwrap() = Some(loader);
         }
         // 事件与适配器

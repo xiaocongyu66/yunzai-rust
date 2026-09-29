@@ -12,7 +12,7 @@ use std::sync::{Arc, RwLock};
 /// 双轨插件：原生 trait / JS 脚本
 pub enum AnyPlugin {
     Native(Arc<dyn Plugin>),
-    Js(crate::jsrt::JsPluginData),
+    Js(crate::nodejs::JsPluginData),
 }
 
 pub struct PluginEntry {
@@ -36,7 +36,7 @@ pub struct TaskJob {
 pub struct PluginsLoader {
     pub priority: RwLock<Vec<Arc<PluginEntry>>>,
     pub task: RwLock<Vec<TaskJob>>,
-    pub engine: RwLock<Option<Arc<crate::jsrt::JsEngine>>>,
+    pub engine: RwLock<Option<Arc<crate::nodejs::JsEngine>>>,
     group_cd: RwLock<HashMap<String, std::time::Instant>>,
     single_cd: RwLock<HashMap<String, std::time::Instant>>,
     msg_throttle: RwLock<HashSet<String>>,
@@ -100,7 +100,7 @@ impl PluginsLoader {
         let existing = self.engine.read().unwrap().clone();
         let engine = match existing {
             Some(e) => Some(e),
-            None => match crate::jsrt::JsEngine::new().await {
+            None => match crate::nodejs::JsEngine::new().await {
                 Ok(e) => {
                     let e = Arc::new(e);
                     *self.engine.write().unwrap() = Some(e.clone());
@@ -113,7 +113,7 @@ impl PluginsLoader {
             },
         };
         if let Some(engine) = engine {
-            let files = crate::jsrt::scan_plugin_files("plugins");
+            let files = crate::nodejs::scan_plugin_files("plugins");
             for (rel, abs) in files {
                 let datas = engine.load_plugin(&abs, &rel).await;
                 for data in datas {
@@ -126,6 +126,19 @@ impl PluginsLoader {
                         format!("加载插件 [{}][{}]", rel, data.name),
                     );
                     count += 1;
+                    // JS 插件的 cron 任务元数据（此前从未上报——本次修复）
+                    for t in &data.tasks {
+                        if t.cron.is_empty() {
+                            continue;
+                        }
+                        tasks.push(TaskJob {
+                            name: t.name.clone(),
+                            cron: t.cron.clone(),
+                            fnc: t.fnc.clone(),
+                            log: t.log,
+                            plugin_key: data.reg_key.clone(),
+                        });
+                    }
                     self.priority.write().unwrap().push(Arc::new(PluginEntry {
                         key: rel.clone(),
                         name: data.name.clone(),
@@ -149,21 +162,21 @@ impl PluginsLoader {
     /// JS 插件派发：实例化 + 调用，返回 false 表示 handler 返回 false（继续下一条 rule）
     async fn js_call(
         &self,
-        engine: &Arc<crate::jsrt::JsEngine>,
-        data: &crate::jsrt::JsPluginData,
+        engine: &Arc<crate::nodejs::JsEngine>,
+        data: &crate::nodejs::JsPluginData,
         e: &E,
         fnc: &str,
     ) -> bool {
-        crate::jsrt::EventGuard::set(&data.reg_key, e.bot.clone(), e.data.clone());
+        crate::nodejs::EventGuard::set(&data.reg_key, e.bot.clone(), e.data.clone());
         engine.instantiate(&data.reg_key, &e.data).await;
         let ret = engine.call(&data.reg_key, fnc, &e.data).await;
-        crate::jsrt::EventGuard::clear(&data.reg_key);
+        crate::nodejs::EventGuard::clear(&data.reg_key);
         ret != "false"
     }
 
     /// ≈ deal — 消息分发主管线
     pub async fn deal(self: &Arc<Self>, bot: Arc<Bot>, data: Value) {
-        let engine: Option<Arc<crate::jsrt::JsEngine>> = self.engine.read().unwrap().clone();
+        let engine: Option<Arc<crate::nodejs::JsEngine>> = self.engine.read().unwrap().clone();
         let mut e = E::new(bot.clone(), data);
         self.count(&e, "receive", &e.message()).await;
         if !self.check_black(&e) {
@@ -217,10 +230,10 @@ impl PluginsLoader {
                 }
                 AnyPlugin::Js(data) => {
                     if let Some(engine) = engine.clone() {
-                        crate::jsrt::EventGuard::set(&data.reg_key, e.bot.clone(), e.data.clone());
+                        crate::nodejs::EventGuard::set(&data.reg_key, e.bot.clone(), e.data.clone());
                         engine.instantiate(&data.reg_key, &e.data).await;
                         let r = engine.accept(&data.reg_key, &e.data).await;
-                        crate::jsrt::EventGuard::clear(&data.reg_key);
+                        crate::nodejs::EventGuard::clear(&data.reg_key);
                         if r == "return" {
                             return;
                         }
@@ -233,8 +246,8 @@ impl PluginsLoader {
         }
         // rule 匹配
         for p in &filtered {
-            let rules: Vec<crate::jsrt::JsRule> = match &p.plugin {
-                AnyPlugin::Native(native) => native.rules().iter().map(|r| crate::jsrt::JsRule {
+            let rules: Vec<crate::nodejs::JsRule> = match &p.plugin {
+                AnyPlugin::Native(native) => native.rules().iter().map(|r| crate::nodejs::JsRule {
                     reg_src: String::new(),
                     rust: Some(r.reg.clone()),
                     fnc: r.fnc.clone(),
@@ -326,7 +339,7 @@ impl PluginsLoader {
         &self,
         filtered: &[Arc<PluginEntry>],
         e: &E,
-        engine: Option<Arc<crate::jsrt::JsEngine>>,
+        engine: Option<Arc<crate::nodejs::JsEngine>>,
     ) -> bool {
         for p in filtered {
             let contexts = collect_context(&p.name, e);
@@ -608,7 +621,7 @@ impl PluginsLoader {
     }
 
     /// ≈ filtPermission — master/owner/admin
-    async fn filt_permission(&self, e: &E, rule: &crate::jsrt::JsRule) -> bool {
+    async fn filt_permission(&self, e: &E, rule: &crate::nodejs::JsRule) -> bool {
         if e.is_master() {
             return true;
         }

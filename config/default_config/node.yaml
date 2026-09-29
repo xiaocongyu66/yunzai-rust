@@ -1,0 +1,9 @@
+# libnode 运行时配置
+# 本地 libnode 动态库路径（留空则自动管理）
+node_path:
+# 缺失时是否自动下载
+autodownload: true
+# V8 老生代内存上限（MB）
+max_old_space_size: 512
+# Rust→JS 单次调用超时（秒）
+call_timeout_s: 30
