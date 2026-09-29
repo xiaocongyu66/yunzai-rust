@@ -82,8 +82,10 @@ pub async fn ensure_libnode(cfg: Option<&crate::config::Cfg>) -> anyhow::Result<
 
     // 2. node.yaml node_path
     if let Some(cfg) = cfg {
-        let node_v = cfg.get("node").get("node_path");
-        let p = if node_v.is_null() { String::new() } else { crate::util::string(&node_v) };
+        let p = match cfg.get("node").get("node_path") {
+            Some(v) if !v.is_null() => crate::util::string(v),
+            _ => String::new(),
+        };
         if !p.is_empty() {
             let path = PathBuf::from(&p);
             if path.is_file() {
