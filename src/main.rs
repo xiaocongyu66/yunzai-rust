@@ -33,6 +33,30 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mode = args.first().map(String::as_str).unwrap_or("");
 
+    // 渲染测试：yunzai --render-test <in.html> [out.png] [width]
+    if mode == "--render-test" {
+        let file = args.get(1).map(String::as_str).unwrap_or("/tmp/test.html");
+        let out = args.get(2).map(String::as_str).unwrap_or("/tmp/test.png");
+        let width: u32 = args.get(3).and_then(|a| a.parse().ok()).unwrap_or(720);
+        match std::fs::read_to_string(file) {
+            Ok(html) => match crate::renderer::render(&html, width, &[]) {
+                Ok(png) => {
+                    std::fs::write(out, &png).ok();
+                    println!("OK {} -> {} ({} bytes)", file, out, png.len());
+                }
+                Err(e) => {
+                    eprintln!("render error: {}", e);
+                    std::process::exit(1);
+                }
+            },
+            Err(e) => {
+                eprintln!("read error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     // ≈ app.js stop — 通知运行中的实例退出
     if mode == "stop" {
         let cfg = Cfg::new();
