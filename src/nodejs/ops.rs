@@ -184,6 +184,14 @@ pub fn op_sync(name: &str, args: &J) -> J {
         "os_uptime" => json!(crate::util::now_ms() / 1000),
         "os_hostname" => json!("yunzai-rust"),
         "process_cwd" => json!(std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()),
+        "cfg_get" => crate::GLOBAL_CFG.get().map(|c| c.get(&s("name"))).unwrap_or(J::Null),
+        "cfg_get_config" => crate::GLOBAL_CFG.get().map(|c| c.get_def_set(&s("name"))).unwrap_or(J::Null),
+        "cfg_get_def" => crate::GLOBAL_CFG.get().map(|c| c.get_config(&s("name"))).unwrap_or(J::Null),
+        "cfg_get_other" => crate::GLOBAL_CFG.get().map(|c| c.get_other()).unwrap_or(J::Null),
+        "cfg_get_group" => crate::GLOBAL_CFG
+            .get()
+            .map(|c| c.get_group(&s("bot_id"), &s("group_id")))
+            .unwrap_or(J::Null),
         _ => J::Null,
     }
 }
