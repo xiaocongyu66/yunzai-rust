@@ -5,7 +5,7 @@
 use serde_json::{json, Value as J};
 use std::path::Path;
 
-pub static GLOBAL_BOT: once_cell::sync::OnceLock<ArcBot> = once_cell::sync::OnceLock::new();
+pub static GLOBAL_BOT: std::sync::OnceLock<ArcBot> = std::sync::OnceLock::new();
 pub type ArcBot = std::sync::Arc<crate::bot::Bot>;
 
 /// 当前派发事件上下文：reg_key → (bot, e_data)（同进程直接访问）

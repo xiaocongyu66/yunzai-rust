@@ -8,7 +8,7 @@ pub mod manager;
 pub mod ops;
 
 use host::call_js;
-use once_cell::sync::OnceLock;
+use std::sync::OnceLock;
 use serde_json::{json, Value as J};
 use std::path::{Path, PathBuf};
 use std::time::Duration;

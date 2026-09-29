@@ -3,7 +3,7 @@
 //! node::Start 阻塞直至 node 退出——在专用线程运行；
 //! host.mjs 拦截 process.exit 保持 event loop 永驻。
 
-use once_cell::sync::OnceLock;
+use std::sync::OnceLock;
 use std::ffi::{c_char, CString};
 use std::path::PathBuf;
 
