@@ -198,6 +198,7 @@ pub fn spawn_watcher(loader: std::sync::Arc<crate::plugins::loader::PluginsLoade
                             if p.extension().and_then(|e| e.to_str()) != Some("js") {
                                 continue;
                             }
+                            crate::util::make_log1(crate::logger::Level::Debug, Some("Plugin"), format!("[watch] {} {:?}", p.display(), ev.kind));
                             pending.insert(p, ev.kind);
                         }
                         last = std::time::Instant::now();
