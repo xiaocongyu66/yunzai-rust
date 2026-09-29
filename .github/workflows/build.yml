@@ -60,7 +60,7 @@ jobs:
       - name: Prepare libnode for tests
         if: matrix.cross == false
         run: |
-          curl -sL --retry 3 --retry-delay 5 -o libnode.so.xz https://raw.githubusercontent.com/xiaocongyu66/yunzai-rust/main/bin/libnode-linux-x86_64.so.xz
+          curl -fL --retry 5 --retry-delay 5 --retry-all-errors -o libnode.so.xz https://raw.githubusercontent.com/xiaocongyu66/yunzai-rust/main/bin/libnode-linux-x86_64.so.xz
           xz -d -k libnode.so.xz
           ls -la libnode-linux-x86_64.so dist/lib/yz_bridge.node
           echo "LIBNODE_PATH=$PWD/libnode-linux-x86_64.so" >> $GITHUB_ENV
