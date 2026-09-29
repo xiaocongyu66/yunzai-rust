@@ -149,7 +149,8 @@ pub fn op(name: String, args: String) -> Result<String> {
 }
 
 /// 异步 op：宿主 tokio 执行后 complete_async 唤醒此 await（napi 自动转 Promise）
-#[napi]
+/// 注意：napi 默认把 snake_case 转成 camelCase（op_async → opAsync），js_name 锁定原名
+#[napi(js_name = "op_async")]
 pub async fn op_async(name: String, args: String) -> Result<String> {
     let (tx, rx) = futures::channel::oneshot::channel::<String>();
     let id = next_def_id();

@@ -45,8 +45,7 @@ const ASYNC_OPS = new Set(['exec', 'redis_get', 'redis_set', 'redis_del', 'redis
   'group_history', 'bot_em', 'send_master_msg', 'bot_exit', 'sleep'])
 
 function rawOp(name, args) {
-  // bridge 的 async 导出未注册成功——统一走同步 op（宿主侧兜底 block_on 异步实现）
-  if (ASYNC_OPS.has(name)) log(0, `op ${name} 走同步路径（async 导出待修）`)
+  if (ASYNC_OPS.has(name)) return bridge.op_async(name, JSON.stringify(args ?? {}))
   return JSON.parse(bridge.op(name, JSON.stringify(args ?? {})))
 }
 // 统一调用点：任何 op 都可 await（同步 op 的非 Promise 值自动包装）
