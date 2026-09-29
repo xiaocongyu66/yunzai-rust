@@ -49,6 +49,8 @@ impl JsEngine {
         }
         let host_path = manager::cache_dir().join("host.mjs");
         std::fs::write(&host_path, HOST_MJS)?;
+        // 生态路径映射：社区插件普遍 `import cfg from "../../lib/config/config.js"`——磁盘写真实模块
+        write_eco_shims(manager::cache_dir().parent().unwrap_or(Path::new(".")))?;
 
         let (_, mos, _timeout_s) = node_cfg(cfg.map(|c| &**c));
         embed::start(lib_path, bridge_path, host_path, mos)?;
@@ -232,6 +234,40 @@ use std::sync::Mutex;
 
 /// 内嵌 host.mjs
 pub const HOST_MJS: &str = include_str!("host.mjs");
+
+/// 写生态映射模块（lib/config/config.js 等；bridge 路径经 YZ_BRIDGE_PATH env）
+fn write_eco_shims(root: &Path) -> anyhow::Result<()> {
+    let cfg_dir = root.join("lib/config");
+    std::fs::create_dir_all(&cfg_dir)?;
+    let cfg_js = r#"// 生态映射：TRSS-Yunzai 的 cfg 门面（经 yz-bridge 与 Rust 主进程通信）
+import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)
+const bridge = require(process.env.YZ_BRIDGE_PATH || 'yz_bridge.node')
+const parse = (s) => { try { return JSON.parse(s) } catch { return null } }
+const cfgProxy = new Proxy({}, {
+  get(_, prop) {
+    if (prop === 'then') return undefined
+    if (prop === 'getGroup') return async (botId, gid) => parse(bridge.op('cfg_get_group', JSON.stringify({ bot_id: botId ?? '', group_id: gid ?? '' })))
+    if (prop === 'getOther') return async () => parse(bridge.op('cfg_get', JSON.stringify({ name: 'other' })))
+    if (prop === 'getdefSet') return async (n) => parse(bridge.op('cfg_get_config', JSON.stringify({ name: n })))
+    if (prop === 'getConfig') return async (n) => parse(bridge.op('cfg_get', JSON.stringify({ name: n })))
+    return parse(bridge.op('cfg_get', JSON.stringify({ name: String(prop) })))
+  },
+})
+export default cfgProxy
+export { cfgProxy as config, cfgProxy as cfg }
+"#;
+    std::fs::write(cfg_dir.join("config.js"), cfg_js)?;
+    let plg_dir = root.join("lib/plugins");
+    std::fs::create_dir_all(&plg_dir)?;
+    std::fs::write(plg_dir.join("plugin.js"), "export default globalThis.plugin
+")?;
+    let cmn_dir = root.join("lib/common");
+    std::fs::create_dir_all(&cmn_dir)?;
+    std::fs::write(cmn_dir.join("common.js"), "export default {}
+")?;
+    Ok(())
+}
 
 /// 在二进制旁/发行包 lib/ 下找随包 bridge
 fn find_bundled_bridge() -> Option<PathBuf> {
