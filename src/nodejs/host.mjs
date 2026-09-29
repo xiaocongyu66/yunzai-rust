@@ -272,9 +272,12 @@ function regexTest(regKey, idx, msg) {
 }
 
 // ============ dispatcher：Rust 指令泵入口 ============
-async function dispatcher(cmdJson) {
+// napi CalleeHandled 策略：JS 回调签名为 (err, value)
+async function dispatcher(err, cmdJson) {
+  if (err) return
   let cmd
   try { cmd = JSON.parse(cmdJson) } catch { return }
+  if (!cmd || typeof cmd !== 'object') return
   const { __id: id, cmd: c } = cmd
   let result = 'null'
   try {
