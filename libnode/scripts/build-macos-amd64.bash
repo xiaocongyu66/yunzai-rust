@@ -54,7 +54,9 @@ function build() {
   python3 - <<'EOF'
 import pathlib
 for p in pathlib.Path('./node/deps').rglob('cpu_features.c'):
-    p.write_text('#define CPU_NO_SIMD\n' + p.read_text())
+    body = p.read_text()
+    body = body.replace('#elif defined(ADLER32_SIMD_SSSE3)', '#elif 0')
+    p.write_text('#define CPU_NO_SIMD\n' + body)
 EOF
 
   ./configure \
