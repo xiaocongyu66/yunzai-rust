@@ -33,8 +33,6 @@ fn node_cfg(cfg: Option<&crate::config::Cfg>) -> (bool, u32, u64) {
 /// 编译期内嵌的 napi 桥（build.rs 从 YZ_BRIDGE_BIN 拷入 OUT_DIR；本地开发为空占位）
 pub const EMBED_BRIDGE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/yz_bridge.node"));
 
-/// 编译期内嵌的 napi 桥（build.rs 从 YZ_BRIDGE_BIN 拷入 OUT_DIR；本地开发为空占位）
-pub const EMBED_BRIDGE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/yz_bridge.node"));
 
 /// memfd 内存直载内嵌桥 → 返回 /proc/self/fd/<n> 路径（不落盘；fd 随进程生命周期）
 #[cfg(unix)]
