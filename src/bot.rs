@@ -213,6 +213,8 @@ pub struct Bot {
     pub adapters: RwLock<Vec<AdapterMeta>>,
     pub wsf: RwLock<HashMap<String, Vec<WsfHandler>>>,
     pub redis: RwLock<Option<Arc<crate::config::redis::RedisHandle>>>,
+    /// ≈ Bot.fs — 文件外链缓冲（fileToUrl 暂存 buf，/File/{name} 供外部取）
+    pub fs: RwLock<HashMap<String, crate::util::FileEntry>>,
     pub loader: RwLock<Option<Arc<crate::plugins::loader::PluginsLoader>>>,
     pub url: RwLock<String>,
     bus: RwLock<HashMap<String, Vec<BusEntry>>>,
@@ -233,6 +235,7 @@ impl Bot {
             adapters: RwLock::new(Vec::new()),
             wsf: RwLock::new(HashMap::new()),
             redis: RwLock::new(None),
+            fs: RwLock::new(HashMap::new()),
             loader: RwLock::new(None),
             url: RwLock::new(String::new()),
             bus: RwLock::new(HashMap::new()),
@@ -643,6 +646,7 @@ impl Bot {
                         let app = axum::Router::new()
                             .route("/exit", axum::routing::any(server_exit))
                             .route("/status", axum::routing::get(server_status))
+                            .route("/File/{name}", axum::routing::get(server_file))
                             .fallback(server_fallback)
                             .with_state(bot.clone());
                         let _ = axum::serve(
@@ -741,6 +745,84 @@ async fn server_status(State(_bot): State<Arc<Bot>>) -> axum::response::Response
         "uptime": util::now_ms() as f64 / 1000.0,
     });
     axum::response::Json(report).into_response()
+}
+
+/// ≈ /File/{name} — fileToUrl 外链下载（auth 校验与 fallback 一致，times 递减后自动销毁）
+async fn server_file(
+    State(bot): State<Arc<Bot>>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
+    req: axum::extract::Request,
+) -> axum::response::Response {
+    use axum::http::header;
+    let query: HashMap<String, String> = req
+        .uri()
+        .query()
+        .map(|q| {
+            q.split('&')
+                .filter_map(|kv| {
+                    let mut it = kv.splitn(2, '=');
+                    Some((it.next()?.to_string(), it.next().unwrap_or("").to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    // auth（与 fallback 一致：headers/query 任一匹配即放行）
+    let auth = bot.cfg.get("server").get("auth").cloned().unwrap_or(Value::Null);
+    if let Value::Object(auth_map) = &auth {
+        if !auth_map.is_empty() {
+            for (k, v) in auth_map {
+                let hv = req.headers().get(k.as_str()).and_then(|h| h.to_str().ok()).unwrap_or("");
+                let qv = query.get(k).map(String::as_str).unwrap_or("");
+                if hv != util::string(v) && qv != util::string(v) {
+                    util::make_log(Level::Error, Some(&format!("http <≠ {}", addr.ip())), true,
+                        vec![format!("File {} 下载鉴权失败", name)]);
+                    return axum::http::StatusCode::UNAUTHORIZED.into_response();
+                }
+            }
+        }
+    }
+    let decoded = urlencoding_decode(&name).unwrap_or_else(|| name.clone());
+    let entry = bot.fs.read().unwrap().get(&decoded).cloned();
+    match entry {
+        Some(e) => {
+            // times 递减：减到 0 则取走并删除
+            let drop_it = {
+                let mut t = e.times.lock().unwrap();
+                if let Some(n) = *t {
+                    if n <= 1 { *t = Some(0); true } else { *t = Some(n - 1); false }
+                } else { false }
+            };
+            if drop_it {
+                bot.fs.write().unwrap().remove(&decoded);
+            }
+            ([(header::CONTENT_TYPE, e.content_type.clone())],
+             axum::response::IntoResponse::into_response(axum::body::Body::from(e.buffer.as_slice().to_vec())))
+                .into_response()
+        }
+        None => axum::http::StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+fn urlencoding_decode(s: &str) -> Option<String> {
+    let mut out = Vec::with_capacity(s.len());
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            let h = (b[i + 1] as char).to_digit(16)?;
+            let l = (b[i + 2] as char).to_digit(16)?;
+            out.push(((h << 4) | l) as u8);
+            i += 3;
+        } else if b[i] == b'+' {
+            out.push(b' ');
+            i += 1;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 async fn server_fallback(

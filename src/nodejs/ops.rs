@@ -184,6 +184,39 @@ pub fn op_sync(name: &str, args: &J) -> J {
         "os_uptime" => json!(crate::util::now_ms() / 1000),
         "os_hostname" => json!("yunzai-rust"),
         "process_cwd" => json!(std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()),
+        "file_to_url" => {
+            // ≈ Bot.fileToUrl — 存 buf 到 Bot.fs，返回 http://bot.url/File/name?auth...
+            let data_b64 = s("data");
+            let name_raw = s("name");
+            let mime = {
+                let m = s("mime");
+                if m.is_empty() { "application/octet-stream".to_string() } else { m }
+            };
+            let buf = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data_b64).unwrap_or_default();
+            let name = if name_raw.is_empty() { ulid::Ulid::new().to_string() } else { urlencoding_encode(&name_raw) };
+            let times_n = args.get("times").and_then(J::as_u64).map(|n| n as u32);
+            if let Some(bot) = GLOBAL_BOT.get() {
+                bot.fs.write().unwrap().insert(name.clone(), crate::util::FileEntry {
+                    buffer: std::sync::Arc::new(buf),
+                    content_type: mime,
+                    times: std::sync::Mutex::new(times_n),
+                });
+                let base = bot.url.read().unwrap().clone();
+                let mut url = format!("{}/File/{}", base.trim_end_matches('/'), name);
+                // auth query 拼接（与原版一致：cfg.server.auth 全键入 query）
+                if let Value::Object(auth_map) = bot.cfg.get("server").get("auth") {
+                    for (k, v) in auth_map {
+                        url.push_str(if url.contains('?') { "&" } else { "?" });
+                        url.push_str(&k);
+                        url.push('=');
+                        url.push_str(&crate::util::string(v));
+                    }
+                }
+                json!(url)
+            } else {
+                J::Null
+            }
+        }
         "cfg_get" => crate::GLOBAL_CFG.get().map(|c| c.get(&s("name"))).unwrap_or(J::Null),
         "cfg_get_config" => crate::GLOBAL_CFG.get().map(|c| c.get_def_set(&s("name"))).unwrap_or(J::Null),
         "cfg_get_def" => crate::GLOBAL_CFG.get().map(|c| c.get_config(&s("name"))).unwrap_or(J::Null),
@@ -202,7 +235,19 @@ pub fn op_sync(name: &str, args: &J) -> J {
     }
 }
 
-pub fn hash_op(algo: &str, data: &str, enc: String) -> J {
+pub fn urlencoding_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b'~' {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{:02X}", b));
+        }
+    }
+    out
+}
+
+fn hash_op(algo: &str, data: &str, enc: String) -> J {
     use md5::Digest;
     let bytes = data.as_bytes();
     let hex = |out: &[u8]| -> J {

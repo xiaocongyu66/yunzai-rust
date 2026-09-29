@@ -157,6 +157,11 @@ globalThis.Bot = new Proxy({}, {
     if (prop === 'pickFriend' || prop === 'pickUser') return (id) => ({ sendMsg: async (m) => op('friend_send', { self_id: globalThis.Bot?.uin ?? '', user_id: id, msg: JSON.stringify(m) }) })
     if (prop === 'pickGroup') return (id) => ({ sendMsg: async (m) => op('group_send', { self_id: globalThis.Bot?.uin ?? '', group_id: id, msg: JSON.stringify(m) }) })
     if (prop === 'pickMember') return (gid, uid) => ({ getInfo: async () => op('friend_info', { self_id: globalThis.Bot?.uin ?? '', user_id: uid ?? gid }) })
+    if (prop === 'fileToUrl') return async (data, opts = {}) => {
+      // data: Buffer/base64 串；opts.name 文件名、opts.times 剩余下载次数、opts.mime
+      const b64 = Buffer.isBuffer(data) ? data.toString('base64') : Buffer.isBuffer(data?.buffer) ? data.buffer.toString('base64') : String(data ?? '')
+      return await op('file_to_url', { data: b64, name: opts.name ?? data?.name ?? '', times: opts.times ?? null, mime: opts.mime ?? '' })
+    }
     if (prop === 'sendFriendMsg') return async (a, b) => op('friend_send', { self_id: a.self_id, user_id: a.user_id, msg: JSON.stringify(b ?? a.msg ?? '') })
     if (prop === 'sendGroupMsg') return async (a, b) => op('group_send', { self_id: a.self_id, group_id: a.group_id, msg: JSON.stringify(b ?? a.msg ?? '') })
     if (prop === 'sendMasterMsg') return async (m) => op('send_master_msg', { msg: JSON.stringify(m) })
