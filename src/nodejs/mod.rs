@@ -54,7 +54,7 @@ impl JsEngine {
         if !host::wait_ready(Duration::from_secs(30)).await {
             return Err(anyhow::anyhow!("[Node] host.mjs 30s 内未就绪（嵌入失败，详见日志）"));
         }
-        crate::util::make_log1(crate::logger::Level::Mark, Some("Node"), "嵌入 Node 插件引擎就绪");
+        crate::util::make_log1(crate::logger::Level::Mark, Some("Node"), "嵌入 Node 插件引擎就绪".to_string());
         Ok(JsEngine)
     }
 
