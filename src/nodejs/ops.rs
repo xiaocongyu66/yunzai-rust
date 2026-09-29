@@ -192,7 +192,13 @@ pub fn op_sync(name: &str, args: &J) -> J {
             .get()
             .map(|c| c.get_group(&s("bot_id"), &s("group_id")))
             .unwrap_or(J::Null),
-        _ => J::Null,
+        _ => {
+            // 异步 op 兜底：node 同步线程内 block_on 宿主 runtime（Handle::block_on 可跨线程）
+            match crate::nodejs::host::MAIN_HANDLE.get() {
+                Some(h) => h.block_on(op_async(name, args.clone())),
+                None => J::Null,
+            }
+        }
     }
 }
 
