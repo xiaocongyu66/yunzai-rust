@@ -25,6 +25,7 @@ pub struct PluginEntry {
     pub plugin: AnyPlugin,
 }
 
+#[derive(Clone, Debug)]
 pub struct TaskJob {
     pub name: String,
     pub cron: String,

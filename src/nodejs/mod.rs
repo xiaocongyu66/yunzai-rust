@@ -36,7 +36,7 @@ impl JsEngine {
     /// 初始化：确保 libnode → dlopen 嵌入 → 等待 host.mjs 就绪
     pub async fn new() -> anyhow::Result<JsEngine> {
         let cfg = crate::GLOBAL_CFG.get();
-        let (lib_path, _fresh) = manager::ensure_libnode(cfg).await?;
+        let (lib_path, _fresh) = manager::ensure_libnode(cfg.as_deref()).await?;
         // bridge.node / host.mjs 运行时文件
         let bridge_path = manager::cache_dir().join("yz_bridge.node");
         if let Some(bundled) = find_bundled_bridge() {
@@ -49,7 +49,7 @@ impl JsEngine {
         let host_path = manager::cache_dir().join("host.mjs");
         std::fs::write(&host_path, HOST_MJS)?;
 
-        let (_, mos, timeout_s) = node_cfg(cfg);
+        let (_, mos, _timeout_s) = node_cfg(cfg.as_deref());
         embed::start(lib_path, bridge_path, host_path, mos)?;
         if !host::wait_ready(Duration::from_secs(30)).await {
             return Err(anyhow::anyhow!("[Node] host.mjs 30s 内未就绪（嵌入失败，详见日志）"));

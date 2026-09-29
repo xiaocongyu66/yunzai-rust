@@ -33,8 +33,6 @@ pub fn start(libnode_path: PathBuf, bridge_path: PathBuf, host_path: PathBuf, ma
         CString::new(host_s)?,
         CString::new(bridge_s)?,
     ];
-    let mut argv_ptrs: Vec<*const c_char> = argv.iter().map(|a| a.as_ptr() as *const c_char).collect();
-    argv_ptrs.push(std::ptr::null());
     let argc = argv.len() as i32;
 
     STARTED.set(()).ok();
@@ -45,6 +43,9 @@ pub fn start(libnode_path: PathBuf, bridge_path: PathBuf, host_path: PathBuf, ma
         .stack_size(16 * 1024 * 1024)
         .spawn(move || {
             let lib = LIBNODE_LIB.get().expect("libnode");
+            // 裸指针不可跨线程，闭包内从 CString 重建（argv 为 move 所有权）
+            let mut argv_ptrs: Vec<*const c_char> = argv.iter().map(|a| a.as_ptr() as *const c_char).collect();
+            argv_ptrs.push(std::ptr::null());
             // node::Start C++ 修饰名（node.h NODE_EXTERN，shared 构建导出）
             let sym: Result<libloading::Symbol<unsafe extern "C" fn(i32, *mut *const c_char) -> i32>, _> =
                 unsafe { lib.get(b"_ZN4node5StartEiPPc\0") };
