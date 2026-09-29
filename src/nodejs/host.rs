@@ -133,7 +133,7 @@ pub fn exchange_fns(bridge_lib: &libloading::os::unix::Library) -> anyhow::Resul
         on_ready: on_ready_impl,
         log: log_impl,
     }));
-    let init: libloading::Symbol<unsafe extern "C" fn(*const YzHostFns) -> *const BridgeFns> =
+    let init: libloading::os::unix::Symbol<unsafe extern "C" fn(*const YzHostFns) -> *const BridgeFns> =
         unsafe { bridge_lib.get(b"yz_init\0") }?;
     let bridge_fns: *const BridgeFns = unsafe { init(host_fns as *const YzHostFns) };
     let _ = HOST_FNS.set(host_fns);

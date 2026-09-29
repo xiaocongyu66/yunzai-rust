@@ -53,7 +53,7 @@ pub fn start(libnode_path: PathBuf, bridge_path: PathBuf, host_path: PathBuf, ma
             let mut argv_ptrs: Vec<*const c_char> = argv.iter().map(|a| a.as_ptr() as *const c_char).collect();
             argv_ptrs.push(std::ptr::null());
             // node::Start C++ 修饰名（node.h NODE_EXTERN，shared 构建导出）
-            let sym: Result<libloading::Symbol<unsafe extern "C" fn(i32, *mut *const c_char) -> i32>, _> =
+            let sym: Result<libloading::os::unix::Symbol<unsafe extern "C" fn(i32, *mut *const c_char) -> i32>, _> =
                 unsafe { lib.get(b"_ZN4node5StartEiPPc\0") };
             match sym {
                 Ok(start_fn) => {
