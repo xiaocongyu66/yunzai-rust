@@ -160,6 +160,49 @@ impl PluginsLoader {
         let _ = bot;
     }
 
+    /// 按 key 前缀卸载插件 entry（热重载路径）
+    pub fn unload_key(&self, key_prefix: &str) {
+        let mut p = self.priority.write().unwrap();
+        p.retain(|e| !e.key.starts_with(key_prefix));
+        // task 表同步清
+        let mut t = self.task.write().unwrap();
+        t.retain(|j| !j.plugin_key.starts_with(key_prefix));
+    }
+
+    /// 重新加载单个文件（热重载路径）
+    pub async fn reload_plugin(&self, rel: &str, abs: &str) {
+        let engine = match self.engine.read().unwrap().clone() {
+            Some(e) => e,
+            None => return,
+        };
+        let datas = engine.load_plugin(abs, rel).await;
+        let mut count = 0usize;
+        let mut task_add = vec![];
+        for data in datas {
+            if data.name.is_empty() { continue; }
+            count += 1;
+            for t in &data.tasks {
+                if t.cron.is_empty() { continue; }
+                task_add.push(TaskJob {
+                    name: t.name.clone(), cron: t.cron.clone(), fnc: t.fnc.clone(), log: t.log,
+                    plugin_key: data.reg_key.clone(),
+                });
+            }
+            self.priority.write().unwrap().push(Arc::new(PluginEntry {
+                key: rel.to_string(),
+                name: data.name.clone(),
+                dsc: data.dsc.clone(),
+                event: data.event.clone(),
+                priority: data.priority,
+                namespace: data.reg_key.clone(),
+                plugin: AnyPlugin::Js(data),
+            }));
+        }
+        self.task.write().unwrap().extend(task_add);
+        self.priority.write().unwrap().sort_by_key(|e| e.priority);
+        util::make_log1(Level::Info, Some("Plugin"), format!("热更新插件 [{}][{}个实例]", rel, count));
+    }
+
     /// JS 插件派发：实例化 + 调用，返回 false 表示 handler 返回 false（继续下一条 rule）
     async fn js_call(
         &self,

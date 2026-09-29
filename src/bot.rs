@@ -589,6 +589,7 @@ impl Bot {
             loader.load(self).await;
             // cron 定时任务调度（JS 插件 task 元数据消费点）
             crate::plugins::cron::spawn_scheduler(loader.clone()).await;
+            crate::plugins::cron::spawn_watcher(loader.clone());
             *self.loader.write().unwrap() = Some(loader);
         }
         // 事件与适配器

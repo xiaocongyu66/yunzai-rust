@@ -155,3 +155,102 @@ mod tests {
         assert!(!cron_match("0 0 * * 1", t("2026-09-29 00:00:30")));
     }
 }
+
+// ============================ 插件热重载（notify watch plugins/） ============================
+
+/// ≈ lib/plugins/loader.js 的 watch() — chokidar 等价：debounce 5s
+/// change → 重新加载该文件；unlink → 卸载其注册项；add → 加载新文件
+pub fn spawn_watcher(loader: std::sync::Arc<crate::plugins::loader::PluginsLoader>) {
+    use notify::{RecursiveMode, Watcher};
+    use std::path::Path;
+
+    let plugins_dir = Path::new("plugins");
+    if !plugins_dir.is_dir() {
+        return;
+    }
+
+    let loader_c = loader.clone();
+    // 去抖窗口：同文件 5s 内合并事件（编辑器原子保存/连续写）
+    std::thread::Builder::new()
+        .name("plugin-watch".into())
+        .spawn(move || {
+            let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
+            let mut watcher = match notify::RecommendedWatcher::new(tx, notify::Config::default()) {
+                Ok(w) => w,
+                Err(e) => {
+                    crate::util::make_log1(crate::logger::Level::Warn, Some("Plugin"), format!("文件监听初始化失败 {e}"));
+                    return;
+                }
+            };
+            if watcher.watch(plugins_dir, RecursiveMode::Recursive).is_err() {
+                return;
+            }
+            // 主循环：收到事件就进 debounce 攒批，5s 无新事件才 flush
+            let mut pending: std::collections::HashMap<std::path::PathBuf, notify::EventKind> = std::collections::HashMap::new();
+            let mut last = std::time::Instant::now();
+            loop {
+                match rx.recv_timeout(std::time::Duration::from_millis(500)) {
+                    Ok(Ok(ev)) => {
+                        for p in ev.paths {
+                            // 只关心 .js
+                            if p.extension().and_then(|e| e.to_str()) != Some("js") {
+                                continue;
+                            }
+                            pending.insert(p, ev.kind);
+                        }
+                        last = std::time::Instant::now();
+                    }
+                    _ => {
+                        if !pending.is_empty() && last.elapsed() >= std::time::Duration::from_secs(5) {
+                            let batch: Vec<(std::path::PathBuf, notify::EventKind)> = pending.drain().collect();
+                            for (path, kind) in batch {
+                                handle_watch_event(&loader_c, &path, kind);
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        .ok();
+}
+
+fn handle_watch_event(
+    loader: &std::sync::Arc<crate::plugins::loader::PluginsLoader>,
+    path: &std::path::Path,
+    kind: notify::EventKind,
+) {
+    use notify::EventKind;
+    let rel = path
+        .strip_prefix("plugins")
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default();
+    if rel.is_empty() {
+        return;
+    }
+    let is_rm = matches!(kind, EventKind::Remove(_) | EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::From)));
+    let is_add = matches!(kind, EventKind::Create(_) | EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::To)));
+
+    crate::util::make_log1(
+        crate::logger::Level::Mark,
+        Some("Plugin"),
+        format!("[{}{}][{}]", if is_rm { "卸载插件" } else { "热更新" }, if is_add { "新增" } else { "修改" }, rel),
+    );
+
+    // 卸载旧 entry（按 rel 前缀）
+    loader.unload_key(&rel);
+
+    if !is_rm && path.is_file() {
+        // 重新 import（新线程里 block_on——watch 线程非 tokio）
+        let loader = loader.clone();
+        let abs = std::fs::canonicalize(path).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string_lossy().into_owned());
+        let rel2 = rel.clone();
+        std::thread::spawn(move || {
+            if let Some(handle) = crate::nodejs::host::MAIN_HANDLE.get() {
+                handle.spawn(async move {
+                    loader.reload_plugin(&rel2, &abs).await;
+                });
+            }
+        });
+    }
+}
