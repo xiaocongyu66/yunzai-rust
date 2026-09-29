@@ -61,7 +61,7 @@ jobs:
         if: matrix.cross == false
         run: |
           curl -fL --retry 5 --retry-delay 5 --retry-all-errors -o libnode.so.xz https://raw.githubusercontent.com/xiaocongyu66/yunzai-rust/main/bin/libnode-linux-x86_64.so.xz
-          xz -d -k libnode.so.xz
+          xz -d -c libnode.so.xz > libnode-linux-x86_64.so
           ls -la libnode-linux-x86_64.so dist/lib/yz_bridge.node
           echo "LIBNODE_PATH=$PWD/libnode-linux-x86_64.so" >> $GITHUB_ENV
           echo "YZ_BRIDGE_PATH=$PWD/dist/lib/yz_bridge.node" >> $GITHUB_ENV
