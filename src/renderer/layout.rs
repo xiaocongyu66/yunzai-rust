@@ -104,7 +104,7 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
         "wrap" => FlexWrap::Wrap,
         _ => FlexWrap::NoWrap,
     };
-    let gap_parts = split_commas(d("gap").unwrap_or_default());
+    let gap_parts = d("gap").map(|s| split_commas(&s)).unwrap_or_default();
     let (gx, gy) = match gap_parts.len() {
         0 => ("0".into(), "0".into()),
         1 => (gap_parts[0].clone(), gap_parts[0].clone()),
@@ -240,7 +240,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine) -> Resul
                     ..st
                 })
                 .map_err(|e| e.to_string())?;
-            taffy.set_node_context(id, base_ctx).map_err(|e| e.to_string())?;
+            taffy.set_node_context(id, Some(base_ctx)).map_err(|e| e.to_string())?;
             return Ok(id);
         }
 
@@ -258,17 +258,17 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine) -> Resul
                     ..Default::default()
                 })
                 .map_err(|e| e.to_string())?;
-            taffy.set_node_context(id, base_ctx).map_err(|e| e.to_string())?;
+            taffy.set_node_context(id, Some(base_ctx.clone())).map_err(|e| e.to_string())?;
             child_ids.push(id);
         }
 
         if child_ids.is_empty() {
             let id = taffy.new_leaf(st).map_err(|e| e.to_string())?;
-            taffy.set_node_context(id, base_ctx).map_err(|e| e.to_string())?;
+            taffy.set_node_context(id, Some(base_ctx)).map_err(|e| e.to_string())?;
             return Ok(id);
         }
         let id = taffy.new_with_children(st, &child_ids).map_err(|e| e.to_string())?;
-        taffy.set_node_context(id, base_ctx).map_err(|e| e.to_string())?;
+        taffy.set_node_context(id, Some(base_ctx)).map_err(|e| e.to_string())?;
         Ok(id)
     }
 
@@ -287,9 +287,12 @@ pub fn compute(mut tree: Tree, width: f32) -> Result<(PaintNode, f32), String> {
 }
 
 fn collect(taffy: &mut TaffyTree<NodeCtx>, id: taffy::NodeId, ox: f32, oy: f32) -> Result<PaintNode, String> {
-    let lay = taffy.layout(id).map_err(|e| e.to_string())?;
-    let x = ox + lay.location.x;
-    let y = oy + lay.location.y;
+    let (nx, ny, nw, nh) = {
+        let lay = taffy.layout(id).map_err(|e| e.to_string())?;
+        (ox + lay.location.x, oy + lay.location.y, lay.size.width, lay.size.height)
+    };
+    let x = nx;
+    let y = ny;
     let ctx = taffy.get_node_context(id).cloned().unwrap_or(NodeCtx {
         decls: BTreeMap::new(),
         text: String::new(),
@@ -301,14 +304,15 @@ fn collect(taffy: &mut TaffyTree<NodeCtx>, id: taffy::NodeId, ox: f32, oy: f32) 
         src: None,
     });
     let mut children = Vec::new();
-    for c in taffy.children(id).map_err(|e| e.to_string())? {
+    let kids = taffy.children(id).map_err(|e| e.to_string())?;
+    for c in kids {
         children.push(collect(taffy, c, x, y)?);
     }
     Ok(PaintNode {
         x,
         y,
-        w: lay.size.width,
-        h: lay.size.height,
+        w: nw,
+        h: nh,
         decls: ctx.decls,
         text: ctx.text,
         text_align: ctx.align,

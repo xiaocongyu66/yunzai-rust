@@ -54,14 +54,24 @@ fn hex2(a: u8, b: u8) -> u8 {
     (d(a) << 4) | d(b)
 }
 
+/// 矩形路径（点线构造，零 Rect 依赖）
+fn rect_path(x: f32, y: f32, w: f32, h: f32) -> Path {
+    let mut pb = PathBuilder::new();
+    pb.move_to(x, y);
+    pb.line_to(x + w, y);
+    pb.line_to(x + w, y + h);
+    pb.line_to(x, y + h);
+    pb.close();
+    pb.finish().unwrap_or_else(|| PathBuilder::new().finish().unwrap())
+}
+
 /// 圆角矩形路径
 fn rounded_rect_path(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
     let r = r.clamp(0.0, w.min(h) / 2.0);
     let mut pb = PathBuilder::new();
     let (x, y) = (x as f32, y as f32);
     if r <= 0.01 {
-        pb.push_rect(Rect::from_xywh(x, y, w, h));
-        return pb.finish().unwrap_or_else(|| Path::from_rect(Rect::from_xywh(x, y, w, h)));
+        return rect_path(x, y, w, h);
     }
     pb.move_to(x + r, y);
     pb.line_to(x + w - r, y);
@@ -73,7 +83,7 @@ fn rounded_rect_path(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
     pb.line_to(x, y + r);
     pb.cubic_to(x, y + r * 0.55, x + r * 0.55, y, x + r, y);
     pb.close();
-    pb.finish().unwrap_or_else(|| Path::from_rect(Rect::from_xywh(x, y, w, h)))
+    pb.finish().unwrap_or_else(|| rect_path(x, y, w, h))
 }
 
 /// 解析 background：纯色 / linear-gradient(...) / radial-gradient(...)
@@ -134,7 +144,7 @@ fn parse_stops(parts: &[String]) -> Vec<(f32, [u8; 4])> {
     // 均匀分布无位置色标
     if out.len() >= 2 {
         let n = out.len();
-        let all_auto = out.iter().enumerate().all(|(i, (p, _))| p == f32::MAX || (i == n - 1 && *p == f32::MAX));
+        let all_auto = out.iter().enumerate().all(|(i, (p, _))| **p == f32::MAX || (i == n - 1 && **p == f32::MAX));
         if all_auto {
             let step = 1.0 / (n as f32 - 1.0);
             for (i, e) in out.iter_mut().enumerate() {
@@ -208,9 +218,12 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
             }
             Some(Bg::Radial { stops }) => {
                 if let (Some(fg), Some(lg)) = (stops.first(), stops.last()) {
+                    let center = Point::from_xy(n.x + n.w / 2.0, n.y + n.h / 2.0);
+                    let radius = n.w.min(n.h).max(1.0) / 2.0;
                     let g = RadialGradient::new(
-                        Point::from_xy(n.x + n.w / 2.0, n.y + n.h / 2.0),
-                        n.w.min(n.h).max(1.0) / 2.0,
+                        center,
+                        Point::from_xy(center.x + 1.0, center.y),
+                        radius,
                         grad_stops(&[(0.0, fg.1), (1.0, lg.1)]),
                         SpreadMode::Pad,
                         Transform::identity(),
@@ -289,7 +302,7 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
     let base_x = (n.x + dx).round();
     let base_y = n.y.round();
 
-    buffer.draw(fonts, &mut fonts.swash, cosmic_text_color(color_of(n)), |gx, gy, gw, gh, color| {
+    buffer.draw(&mut fonts.font_system, &mut fonts.swash, cosmic_text_color(color_of(n)), |gx, gy, gw, gh, color| {
         // 回调给的是设备像素矩形 + 颜色（alpha 已混合）
         let px = (base_x as i32) + gx;
         let py = (base_y as i32) + gy;
