@@ -103,6 +103,7 @@ pub fn op_sync(name: &str, args: &J) -> J {
         "yaml_parse" => serde_yaml::from_str::<J>(&s("text")).unwrap_or(J::Null),
         "yaml_stringify" => serde_yaml::to_string(args.get("obj").unwrap_or(&J::Null)).map(J::String).unwrap_or(J::Null),
         "crypto_hash" => hash_op(&s("algo"), &s("data"), args.get("enc").map(crate::util::string).unwrap_or_else(|| "hex".into())),
+        "render" => crate::renderer::render_op(args),
         "crypto_uuid" => json!(ulid::Ulid::new().to_string()),
         "buffer_from" => json!(s("data")),
         "ctx_set" => {
