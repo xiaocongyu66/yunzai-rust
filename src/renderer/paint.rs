@@ -490,7 +490,7 @@ fn draw_box_shadows(pixmap: &mut Pixmap, n: &PaintNode, decl: &str, radius: f32)
                 );
                 p.set_color_rgba8(c[0], c[1], c[2], (c[3] as f32 * a) as u8);
                 let stroke = Stroke { width: bw / 2.0, ..Stroke::default() };
-                pixmap.stroke_path(&path, &p, &stroke, *draw_tx, None);
+                pixmap.stroke_path(&path, &p, &stroke, Transform::identity(), None);
             }
         } else {
             // 外阴影：偏移+扩散矩形，blur 用多层近似
@@ -507,7 +507,7 @@ fn draw_box_shadows(pixmap: &mut Pixmap, n: &PaintNode, decl: &str, radius: f32)
                 );
                 let a = 1.0 - k * 0.6;
                 p.set_color_rgba8(c[0], c[1], c[2], (c[3] as f32 * a * 0.35) as u8);
-                pixmap.fill_path(&path, &p, FillRule::Winding, *draw_tx, None);
+                pixmap.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
             }
         }
     }
