@@ -456,8 +456,9 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
                         if sa == 0 {
                             continue;
                         }
+                        let pw = pixmap.width();
                         let data = pixmap.data_mut();
-                        let di = ((y * pixmap.width() + x) * 4) as usize;
+                        let di = ((y * pw + x) * 4) as usize;
                         let da = data[di + 3] as u32;
                         let out_a = (sa + da * (255 - sa) / 255) as u8;
                         let mix = |fg: u32, bg: u32| ((fg * sa + bg * da * (255 - sa) / 255) / out_a.max(1) as u32) as u8;

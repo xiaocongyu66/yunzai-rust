@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use taffy::prelude::*;
 
 /// 布局完成的绘制节点（绝对坐标 + 原始声明）
+#[derive(Clone)]
 pub struct PaintNode {
     pub x: f32,
     pub y: f32,
