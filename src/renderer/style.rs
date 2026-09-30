@@ -109,19 +109,14 @@ fn tdim(v: &lightningcss::values::percentage::DimensionPercentage<lightningcss::
     }
 }
 
-/// lightningcss DimensionPercentage<LengthPercentage>（LengthPercentageOrAuto 内层）→ taffy LengthPercentageAuto
-fn tlpa(v: &lightningcss::values::percentage::DimensionPercentage<lightningcss::values::length::LengthPercentage>, basis: f32) -> LengthPercentageAuto {
-    use lightningcss::values::percentage::DimensionPercentage as DP;
+/// lightningcss LengthPercentageOrAuto → taffy LengthPercentageAuto
+fn tlpa(v: &lightningcss::values::length::LengthPercentageOrAuto, basis: f32) -> LengthPercentageAuto {
+    use lightningcss::values::length::LengthPercentageOrAuto as LPA;
     match v {
-        DP::Dimension(lp) => match tlp(lp, basis) {
+        LPA::Auto => LengthPercentageAuto::Auto,
+        LPA::LengthPercentage(lp) => match tlp(lp, basis) {
             LengthPercentage::Length(l) => LengthPercentageAuto::Length(l),
             LengthPercentage::Percent(p) => LengthPercentageAuto::Percent(p),
-        },
-        DP::Percentage(p) => LengthPercentageAuto::Percent(p.0),
-        DP::Calc(c) => match calc_dim(c, basis) {
-            Some(Dimension::Length(l)) => LengthPercentageAuto::Length(l),
-            Some(Dimension::Percent(p)) => LengthPercentageAuto::Percent(p),
-            _ => LengthPercentageAuto::Auto,
         },
     }
 }
