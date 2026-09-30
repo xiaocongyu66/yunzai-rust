@@ -291,7 +291,8 @@ impl PluginsLoader {
                         if r == "return" {
                             return;
                         }
-                        if r == "true" {
+                        // ≈ TRSS accept 语义：返回真值即 break（truthy，不限 "true" 字符串）
+                        if r != "null" && r != "false" && r != "undefined" && !r.is_empty() {
                             break;
                         }
                     }
