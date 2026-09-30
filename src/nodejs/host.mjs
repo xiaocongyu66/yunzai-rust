@@ -189,9 +189,9 @@ function buildE(key, eJson) {
       log(2, `[render] 渲染成功 ${(b64.length / 1024) | 0}kb → ${img}`)
       const mid = await e.reply({ type: 'image', file: `file://${img}` })
       log(2, `[render] reply 完成: ${mid}`)
-      // 发送完成后清理本图；render/ 目录中超过 1 小时的残留图也顺带清掉
+      // 延迟 5 分钟清理本图（留时间排查图有效性）；render/ 中超过 1 小时的残留也清掉
       try {
-        fs.rmSync(img, { force: true })
+        setTimeout(() => { try { fs.rmSync(img, { force: true }) } catch {} }, 300_000)
         const now = Date.now()
         for (const f of fs.readdirSync(dir)) {
           const p = `${dir}/${f}`
