@@ -274,7 +274,7 @@ fn apply(p: &Property, basis: f32, r: &mut Resolved) {
             };
         }
         P::JustifyContent(j, _) => {
-            use lightningcss::properties::align::{AlignContent as LJ, ContentPosition, ContentDistribution};
+            use lightningcss::properties::align::{JustifyContent as LJ, ContentPosition, ContentDistribution};
             r.justify_content = match j {
                 LJ::ContentPosition { value: ContentPosition::FlexStart, .. } => Some(JustifyContent::FlexStart),
                 LJ::ContentPosition { value: ContentPosition::Center, .. } => Some(JustifyContent::Center),
