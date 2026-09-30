@@ -406,16 +406,16 @@ fn write_eco_shims(root: &Path, bridge: &str) -> anyhow::Result<()> {
 import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 let bridge
-{{
+{
   const p = {bridge}
-  if (p.startsWith('/dev/fd/') || p.startsWith('/proc/self/fd/')) {{
-    const m = {{ exports: {{}} }}
+  if (p.startsWith('/dev/fd/') || p.startsWith('/proc/self/fd/')) {
+    const m = { exports: {} }
     process.dlopen(m, p)
     bridge = m.exports
-  }} else {{
+  } else {
     bridge = require(p)
-  }}
-}}
+  }
+}
 const parse = (s) => { try { return JSON.parse(s) } catch { return null } }
 const cfgProxy = new Proxy({}, {
   get(_, prop) {
