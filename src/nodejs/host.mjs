@@ -364,7 +364,9 @@ async function accept(regKey, eJson) {
     const inst = new entry.cls()
     inst.e = e
     if (typeof inst.accept !== 'function') return 'null'
-    return String(await inst.accept(e) ?? 'null')
+    const ret = await inst.accept(e) ?? 'null'
+    // TRSS 语义：check/accept 可改写 e.msg（如 #刻晴 → #喵喵角色卡片），回传给宿主更新
+    return JSON.stringify({ ret: String(ret ?? 'null'), msg: typeof e.msg === 'string' ? e.msg : null })
   } catch (err) {
     log(3, `${regKey}.accept 异常: ${err?.stack ?? err}`)
     return 'null'

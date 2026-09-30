@@ -282,17 +282,30 @@ impl PluginsLoader {
                         crate::nodejs::EventGuard::set(&data.reg_key, e.bot.clone(), e.data.clone());
                         engine.instantiate(&data.reg_key, &e.data).await;
                         let r = engine.accept(&data.reg_key, &e.data).await;
+                        crate::nodejs::EventGuard::clear(&data.reg_key);
+                        // accept 现返回 JSON {ret, msg}（旧格式字符串兼容）
+                        let (ret_val, new_msg) = serde_json::from_str::<serde_json::Value>(&r)
+                            .ok()
+                            .map(|v| (
+                                v.get("ret").and_then(|x| x.as_str()).unwrap_or("null").to_string(),
+                                v.get("msg").and_then(|x| x.as_str().map(String::from)),
+                            ))
+                            .unwrap_or((r.clone(), None));
                         crate::util::make_log1(
                             crate::logger::Level::Debug,
                             Some("Plugin"),
-                            format!("accept[{}]: {}", data.reg_key, r),
+                            format!("accept[{}]: {}", data.reg_key, ret_val),
                         );
-                        crate::nodejs::EventGuard::clear(&data.reg_key);
-                        if r == "return" {
+                        if let Some(nm) = new_msg {
+                            if let Some(obj) = e.data.as_object_mut() {
+                                obj.insert("msg".into(), serde_json::Value::String(nm.clone()));
+                            }
+                        }
+                        if ret_val == "return" {
                             return;
                         }
                         // ≈ TRSS accept 语义：返回真值即 break（truthy，不限 "true" 字符串）
-                        if r != "null" && r != "false" && r != "undefined" && !r.is_empty() {
+                        if ret_val != "null" && ret_val != "false" && ret_val != "undefined" && !ret_val.is_empty() {
                             break;
                         }
                     }
