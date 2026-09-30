@@ -196,9 +196,13 @@ fn parse_declarations_lc(s: &str) -> Option<Vec<(String, String)>> {
                 out.push(("column-gap".into(), lc_val(&g.column)));
             }
             other => {
-                // 通用：属性名 + 序列化值
+                // 通用：Property 序列化输出为 "name: value"，剥掉前缀只留值
                 if let Ok(v) = other.to_css_string(false, lc_opts()) {
-                    out.push((name, v));
+                    let val = match v.split_once(':') {
+                        Some((_, rest)) => rest.trim().to_string(),
+                        None => v,
+                    };
+                    out.push((name, val));
                 }
             }
         }
