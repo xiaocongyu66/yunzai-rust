@@ -133,6 +133,14 @@ fn split_combinators(tok: &str) -> Vec<Combinator> {
 
 /// inline style 字符串 → 声明对
 pub fn parse_declarations(s: &str) -> Vec<(String, String)> {
+    // Lightning CSS：按规范解析并展开简写为 longhand（padding/background 等），失败回退手写解析
+    match parse_declarations_lc(s) {
+        Some(out) if !out.is_empty() => out,
+        _ => parse_declarations_legacy(s),
+    }
+}
+
+fn parse_declarations_legacy(s: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for decl in split_top(s, ';') {
         let decl = decl.trim();
@@ -144,6 +152,79 @@ pub fn parse_declarations(s: &str) -> Vec<(String, String)> {
         }
     }
     out
+}
+
+/// Lightning CSS 解析：结构化声明 → longhand 字符串表
+fn parse_declarations_lc(s: &str) -> Option<Vec<(String, String)>> {
+    use lightningcss::properties::Property;
+    use lightningcss::stylesheet::{ParserOptions, StyleSheet};
+    let src = format!("a{{ {} }}", s);
+    let mut ss = StyleSheet::parse(&src, ParserOptions::default()).ok()?;
+    let rule = ss.rules.0.first_mut()?;
+    let style = match rule {
+        lightningcss::rules::CssRule::Style(st) => st,
+        _ => return None,
+    };
+    let mut out = Vec::new();
+    for decl in style.declarations.declarations.iter() {
+        let pid = decl.property_id();
+        let name = pid.name().to_string();
+        match &decl.property {
+            Property::Padding(r) => {
+                out.push(("padding-top".into(), lc_val(&r.0)));
+                out.push(("padding-right".into(), lc_val(&r.1)));
+                out.push(("padding-bottom".into(), lc_val(&r.2)));
+                out.push(("padding-left".into(), lc_val(&r.3)));
+            }
+            Property::Margin(r) => {
+                out.push(("margin-top".into(), lc_val(&r.0)));
+                out.push(("margin-right".into(), lc_val(&r.1)));
+                out.push(("margin-bottom".into(), lc_val(&r.2)));
+                out.push(("margin-left".into(), lc_val(&r.3)));
+            }
+            Property::Background(list) => {
+                for b in list {
+                    if let Some(img) = &b.image {
+                        out.push(("background-image".into(), lc_val(img)));
+                    }
+                    out.push(("background-color".into(), lc_val(&b.color)));
+                    out.push(("background-position".into(), lc_val(&b.position)));
+                    out.push(("background-size".into(), lc_val(&b.size)));
+                    out.push(("background-repeat".into(), lc_val(&b.repeat)));
+                }
+            }
+            Property::Gap(g) => {
+                out.push(("row-gap".into(), lc_val(&g.row)));
+                out.push(("column-gap".into(), lc_val(&g.column)));
+            }
+            Property::BorderRadius(r) => {
+                out.push(("border-radius".into(), lc_val_radius(r)));
+            }
+            other => {
+                // 通用：属性名 + 序列化值
+                if let Ok(v) = other.to_css_string() {
+                    out.push((name, v));
+                }
+            }
+        }
+    }
+    Some(out)
+}
+
+/// lightningcss 值 → 字符串（走 ToCss 序列化）
+fn lc_val<T: lightningcss::traits::ToCss>(v: &T) -> String {
+    v.to_css_string().unwrap_or_default()
+}
+
+fn lc_val_radius(r: &lightningcss::properties::border_radius::BorderRadius) -> String {
+    let h = &r.radius;
+    format!(
+        "{} {} {} {}",
+        lc_val(&h.top_left),
+        lc_val(&h.top_right),
+        lc_val(&h.bottom_right),
+        lc_val(&h.bottom_left)
+    )
 }
 
 /// 括号感知的顶层分割（linear-gradient(a,b) 内的 ; 逗号不切）

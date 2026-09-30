@@ -141,6 +141,17 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
     };
     let (pt, pr, pb, pl) = expand(&sides("padding"), "0");
     let (mt, mr, mb, ml) = expand(&sides("margin"), "0");
+    // longhand（Lightning CSS 展开）覆盖简写展开值
+    let pt = d("padding-top").unwrap_or(pt);
+    let pr = d("padding-right").unwrap_or(pr);
+    let pb = d("padding-bottom").unwrap_or(pb);
+    let pl = d("padding-left").unwrap_or(pl);
+    let mt = d("margin-top").unwrap_or(mt);
+    let mr = d("margin-right").unwrap_or(mr);
+    let mb = d("margin-bottom").unwrap_or(mb);
+    let ml = d("margin-left").unwrap_or(ml);
+    let gx = d("column-gap").unwrap_or(gx);
+    let gy = d("row-gap").unwrap_or(gy);
 
     Style {
         display: match display.as_deref() {
