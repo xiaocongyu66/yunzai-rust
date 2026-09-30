@@ -58,22 +58,23 @@ pub fn parse_with_base(html: &str, base_dir: &str) -> Result<(StyleNode, Vec<Css
     let mut link_hrefs: Vec<String> = vec![];
     walk(&dom.document, &mut |h| {
         if let NodeData::Element { name, attrs, .. } = &h.data {
-            match name.local {
-                LocalName::from("style") => {
+            let local = name.local.to_string();
+            match local.as_str() {
+                "style" => {
                     collect_text(h, &mut styles);
                     styles.push('\n');
                 }
-                LocalName::from("link") => {
+                "link" => {
                     let mut rel_ok = false;
                     let mut href = String::new();
                     for a in attrs.borrow().iter() {
-                        match a.name.local {
-                            LocalName::from("rel") => {
+                        match a.name.local.to_string().as_str() {
+                            "rel" => {
                                 if a.value.to_lowercase().contains("stylesheet") {
                                     rel_ok = true;
                                 }
                             }
-                            LocalName::from("href") => href = a.value.to_string(),
+                            "href" => href = a.value.to_string(),
                             _ => {}
                         }
                     }
