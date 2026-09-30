@@ -180,7 +180,9 @@ function buildE(key, eJson) {
       // ≈ TRSS puppeteer 语义：retType 'base64' 返回 base64；
       //   'default'/'msgId' 直接 reply 图片并返回 msgId
       if (opts.retType === 'base64') return b64
+      log(2, `[render] 渲染成功 ${b64.length}b，reply 中`)
       const mid = await e.reply(b64)
+      log(2, `[render] reply 完成: ${mid}`)
       return mid ?? true
     },
   }
