@@ -24,7 +24,7 @@ pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> R
     let width = width.clamp(64, 4096) as f32;
 
     // 1. 解析 DOM + 收集样式（<style> 块 + inline style + 选择器匹配）
-    let (root_node, rules) = dom::parse(html)?;
+    let (root_node, rules) = dom::parse_with_base(html, base_dir)?;
     let styled = css::apply_styles(root_node, &rules);
 
     // 2. 字体系统

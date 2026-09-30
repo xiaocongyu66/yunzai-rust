@@ -82,8 +82,17 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
         Some("row-reverse") => FlexDirection::RowReverse,
         _ => FlexDirection::Row,
     };
-    // 非 flex 的容器：近似 block = flex column
-    let dir = if is_flex { flex_direction } else { FlexDirection::Column };
+    // 非 flex 的容器：近似 block = flex column；table-row 近似 flex row（table-cell 横排）
+    let is_table_row = display.as_deref() == Some("table-row");
+    let dir = if is_table_row {
+        FlexDirection::Row
+    } else if is_flex {
+        flex_direction
+    } else {
+        FlexDirection::Column
+    };
+    // table-cell：均分父行宽度
+    let cell_grow = if display.as_deref() == Some("table-cell") { 1.0 } else { 0.0 };
 
     let justify = match d("justify-content").as_deref().unwrap_or("") {
         "center" => JustifyContent::Center,
@@ -168,7 +177,9 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
             width: dim(d("max-width").as_deref().unwrap_or("auto"), width),
             height: dim(d("max-height").as_deref().unwrap_or("auto"), width),
         },
-        flex_grow: d("flex-grow").and_then(|v| v.trim().parse().ok()).unwrap_or(0.0),
+        flex_grow: d("flex-grow")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(cell_grow),
         flex_shrink: d("flex-shrink").and_then(|v| v.trim().parse().ok()).unwrap_or(1.0),
         position: match d("position").as_deref().unwrap_or("") {
             "absolute" => Position::Absolute,

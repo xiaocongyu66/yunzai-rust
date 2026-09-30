@@ -45,20 +45,55 @@ pub enum SelectorPart {
 }
 
 pub fn parse(html: &str) -> Result<(StyleNode, Vec<CssRule>), String> {
+    parse_with_base(html, ".")
+}
+
+pub fn parse_with_base(html: &str, base_dir: &str) -> Result<(StyleNode, Vec<CssRule>), String> {
     let dom: RcDom = parse_document(RcDom::default(), Default::default())
         .from_utf8()
         .one(html.as_bytes());
 
     let mut rules = vec![];
     let mut styles = String::new();
+    let mut link_hrefs: Vec<String> = vec![];
     walk(&dom.document, &mut |h| {
-        if let NodeData::Element { name, .. } = &h.data {
-            if name.local == LocalName::from("style") {
-                collect_text(h, &mut styles);
-                styles.push('\n');
+        if let NodeData::Element { name, attrs, .. } = &h.data {
+            match name.local {
+                LocalName::from("style") => {
+                    collect_text(h, &mut styles);
+                    styles.push('\n');
+                }
+                LocalName::from("link") => {
+                    let mut rel_ok = false;
+                    let mut href = String::new();
+                    for a in attrs.borrow().iter() {
+                        match a.name.local {
+                            LocalName::from("rel") => {
+                                if a.value.to_lowercase().contains("stylesheet") {
+                                    rel_ok = true;
+                                }
+                            }
+                            LocalName::from("href") => href = a.value.to_string(),
+                            _ => {}
+                        }
+                    }
+                    if rel_ok && !href.is_empty() {
+                        link_hrefs.push(href);
+                    }
+                }
+                _ => {}
             }
         }
     });
+
+    // 外部 CSS：<link href>（art-template 已把 _res_path 替换为绝对路径）
+    for href in link_hrefs {
+        let path = crate::renderer::media::resolve(&href, base_dir);
+        if let Ok(css) = std::fs::read_to_string(&path) {
+            styles.push_str(&css);
+            styles.push('\n');
+        }
+    }
 
     rules = crate::renderer::css::parse_stylesheet(&styles);
 
