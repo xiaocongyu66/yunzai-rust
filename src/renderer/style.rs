@@ -274,39 +274,42 @@ fn apply(p: &Property, basis: f32, r: &mut Resolved) {
             };
         }
         P::JustifyContent(j, _) => {
-            use lightningcss::properties::align::AlignContent as LJ;
+            use lightningcss::properties::align::{AlignContent as LJ, ContentPosition, ContentDistribution};
             r.justify_content = match j {
-                LJ::FlexStart => Some(JustifyContent::FlexStart),
-                LJ::FlexEnd => Some(JustifyContent::FlexEnd),
-                LJ::Center => Some(JustifyContent::Center),
-                LJ::SpaceBetween => Some(JustifyContent::SpaceBetween),
-                LJ::SpaceAround => Some(JustifyContent::SpaceAround),
-                LJ::SpaceEvenly => Some(JustifyContent::SpaceEvenly),
-                LJ::Stretch => Some(JustifyContent::Stretch),
+                LJ::ContentPosition { value: ContentPosition::FlexStart, .. } => Some(JustifyContent::FlexStart),
+                LJ::ContentPosition { value: ContentPosition::Center, .. } => Some(JustifyContent::Center),
+                LJ::ContentPosition { value: ContentPosition::Start, .. } => Some(JustifyContent::FlexStart),
+                LJ::ContentPosition { value: ContentPosition::End, .. } => Some(JustifyContent::FlexEnd),
+                LJ::ContentPosition { value: ContentPosition::FlexEnd, .. } => Some(JustifyContent::FlexEnd),
+                LJ::ContentDistribution(ContentDistribution::SpaceBetween) => Some(JustifyContent::SpaceBetween),
+                LJ::ContentDistribution(ContentDistribution::SpaceAround) => Some(JustifyContent::SpaceAround),
+                LJ::ContentDistribution(ContentDistribution::SpaceEvenly) => Some(JustifyContent::SpaceEvenly),
                 _ => None,
             };
         }
         P::AlignItems(a, _) => {
-            use lightningcss::properties::align::AlignItems as LA;
+            use lightningcss::properties::align::{AlignItems as LA, SelfPosition};
             r.align_items = match a {
-                LA::FlexStart => Some(AlignItems::FlexStart),
-                LA::FlexEnd => Some(AlignItems::FlexEnd),
-                LA::Center => Some(AlignItems::Center),
-                LA::Baseline => Some(AlignItems::Baseline),
+                LA::SelfPosition { value: SelfPosition::FlexStart, .. } => Some(AlignItems::FlexStart),
+                LA::SelfPosition { value: SelfPosition::FlexEnd, .. } => Some(AlignItems::FlexEnd),
+                LA::SelfPosition { value: SelfPosition::Center, .. } => Some(AlignItems::Center),
+                LA::SelfPosition { value: SelfPosition::Start, .. } => Some(AlignItems::FlexStart),
+                LA::SelfPosition { value: SelfPosition::End, .. } => Some(AlignItems::FlexEnd),
+                LA::BaselinePosition(_) => Some(AlignItems::Baseline),
                 LA::Stretch => Some(AlignItems::Stretch),
                 _ => None,
             };
         }
         P::AlignContent(a, _) => {
-            use lightningcss::properties::align::AlignContent as LC;
+            use lightningcss::properties::align::{AlignContent as LC, ContentPosition, ContentDistribution};
             r.align_content = match a {
-                LC::FlexStart => Some(AlignContent::FlexStart),
-                LC::FlexEnd => Some(AlignContent::FlexEnd),
-                LC::Center => Some(AlignContent::Center),
-                LC::SpaceBetween => Some(AlignContent::SpaceBetween),
-                LC::SpaceAround => Some(AlignContent::SpaceAround),
-                LC::SpaceEvenly => Some(AlignContent::SpaceEvenly),
-                LC::Stretch => Some(AlignContent::Stretch),
+                LC::ContentPosition { value: ContentPosition::FlexStart, .. } => Some(AlignContent::FlexStart),
+                LC::ContentPosition { value: ContentPosition::Center, .. } => Some(AlignContent::Center),
+                LC::ContentPosition { value: ContentPosition::End, .. } => Some(AlignContent::FlexEnd),
+                LC::ContentPosition { value: ContentPosition::FlexEnd, .. } => Some(AlignContent::FlexEnd),
+                LC::ContentDistribution(ContentDistribution::SpaceBetween) => Some(AlignContent::SpaceBetween),
+                LC::ContentDistribution(ContentDistribution::SpaceAround) => Some(AlignContent::SpaceAround),
+                LC::ContentDistribution(ContentDistribution::SpaceEvenly) => Some(AlignContent::SpaceEvenly),
                 _ => None,
             };
         }
