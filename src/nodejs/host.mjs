@@ -244,10 +244,17 @@ async function loadPlugin(absPath, key) {
   const metas = []
   try {
     const mod = await import(`file://${absPath.startsWith('/') ? absPath : '/' + absPath}`)
-    for (const [name, Cls] of Object.entries(mod)) {
-      if (typeof Cls !== 'function' || !Cls.prototype) continue
+    for (const [name, Def] of Object.entries(mod)) {
+      // v3 对象格式（miao 等插件的 v3App() 返回普通对象）与 v2 class 格式双支持
+      const isV3Obj = Def && typeof Def === 'object' && (Def.rule || Def.name)
+      const isCls = typeof Def === 'function' && Def.prototype
+      if (!isV3Obj && !isCls) continue
       let inst
-      try { inst = new Cls() } catch { continue }
+      if (isV3Obj) {
+        inst = Def
+      } else {
+        try { inst = new Def() } catch { continue }
+      }
       let skip = false
       if (typeof inst.init === 'function') {
         try { if ((await inst.init()) === 'return') skip = true } catch (e) { log(3, `${key}.${name} init 异常: ${e?.stack || e?.message || e}`); skip = true }
@@ -259,7 +266,7 @@ async function loadPlugin(absPath, key) {
         permission: String(r.permission ?? 'all'), event: r.event ? String(r.event) : null,
       })) : []
       const tasks = inst.task && inst.task.cron ? [{ name: String(inst.task.name ?? name), cron: String(inst.task.cron), fnc: String(inst.task.fnc ?? ''), log: !!inst.task.log }] : []
-      registry.set(regKey, { cls: Cls, name, key })
+      registry.set(regKey, { cls: isCls ? Def : null, inst: isV3Obj ? inst : null, name, key })
       metas.push({ reg_key: regKey, sub: name, name: String(inst.name ?? name), dsc: String(inst.dsc ?? ''),
         event: String(inst.event ?? 'message'), priority: Number(inst.priority ?? 5000), rules, tasks, _plugin: String(inst.name ?? name) })
     }
@@ -274,7 +281,7 @@ async function instantiate(regKey, eJson) {
   if (!entry) return null
   const e = buildE(regKey, eJson)
   if (e && typeof e === 'object') e._plugin = entry.cls?.name ?? entry.name
-  const inst = new entry.cls()
+  const inst = entry.inst ?? new entry.cls()
   inst.e = e
   if (typeof eJson === 'object' && eJson) {
     inst.self_id = eJson.self_id; inst.user_id = eJson.user_id; inst.group_id = eJson.group_id
@@ -291,7 +298,7 @@ async function callMethod(regKey, fnc, eJson) {
   if (!entry) return 'null'
   try {
     const e = buildE(regKey, eJson)
-    const inst = new entry.cls()
+    const inst = entry.inst ?? new entry.cls()
     inst.e = e
     const ret = await inst[fnc](e)
     if (ret === false) return 'false'
@@ -321,7 +328,7 @@ function regexTest(regKey, idx, msg) {
   const entry = registry.get(regKey)
   if (!entry) return false
   try {
-    const inst = new entry.cls()
+    const inst = entry.inst ?? new entry.cls()
     const reg = inst.rule?.[idx]?.reg
     if (!reg) return false
     return reg instanceof RegExp ? reg.test(msg) : new RegExp(String(reg)).test(msg)
