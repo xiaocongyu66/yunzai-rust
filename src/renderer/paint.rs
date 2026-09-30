@@ -122,10 +122,11 @@ fn parse_bg(v: &str) -> Option<Bg> {
             .collect();
         return Some(Bg::Radial { stops: parse_stops(&stops_raw) });
     }
-    if let Some(u) = v.strip_prefix("url(") {
-        let raw = u.trim_end_matches(')').trim().trim_matches(|c| c == '"' || c == '\'').to_string();
-        let base = super::BASE_DIR.get().map(String::as_str).unwrap_or(".");
-        return Some(Bg::Image(super::media::resolve(&raw, base)));
+    if v.contains("url(") {
+        if let Some(raw) = super::media::extract_url(v) {
+            let base = super::BASE_DIR.get().map(String::as_str).unwrap_or(".");
+            return Some(Bg::Image(super::media::resolve(&raw, base)));
+        }
     }
     parse_color(v).map(Bg::Color)
 }
@@ -272,8 +273,8 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
         pixmap.stroke_path(&path, &p, &stroke, Transform::identity(), None);
     }
 
-    // 文本
-    if !n.text.is_empty() {
+    // 文本（仅叶子画：容器的文本已作为附加叶子单独布局，这里再画会重复）
+    if !n.text.is_empty() && n.children.is_empty() {
         draw_text(pixmap, n, fonts);
     }
 
