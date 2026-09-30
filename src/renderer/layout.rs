@@ -98,7 +98,8 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
         "flex-end" | "end" => AlignItems::FlexEnd,
         "stretch" => AlignItems::Stretch,
         "baseline" => AlignItems::Baseline,
-        _ => AlignItems::FlexStart,
+        // block 容器（近似 flex column）默认 stretch：块级子元素撑满父宽
+        _ => if is_flex { AlignItems::FlexStart } else { AlignItems::Stretch },
     };
     let wrap = match d("flex-wrap").as_deref().unwrap_or("") {
         "wrap" => FlexWrap::Wrap,
@@ -234,11 +235,11 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine) -> Resul
         if n.children.is_empty() && !n.text.is_empty() {
             let maxw = n.decl("width").and_then(|v| v.trim().trim_end_matches("px").parse().ok());
             let (tw, th) = fonts.measure(&n.text, font_size, weight, color, maxw, lh);
+            let mut st = st;
+            // 文本叶子尺寸必须取测量值（inline 语义），覆盖声明里的 auto/percent
+            st.size = Size { width: Dimension::Length(tw), height: Dimension::Length(th) };
             let id = taffy
-                .new_leaf(Style {
-                    size: Size { width: Dimension::Length(tw), height: Dimension::Length(th) },
-                    ..st
-                })
+                .new_leaf(st)
                 .map_err(|e| e.to_string())?;
             taffy.set_node_context(id, Some(base_ctx)).map_err(|e| e.to_string())?;
             return Ok(id);
@@ -258,6 +259,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine) -> Resul
                     ..Default::default()
                 })
                 .map_err(|e| e.to_string())?;
+            let _ = &st;
             taffy.set_node_context(id, Some(base_ctx.clone())).map_err(|e| e.to_string())?;
             child_ids.push(id);
         }
