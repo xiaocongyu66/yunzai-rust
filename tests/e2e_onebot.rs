@@ -206,7 +206,7 @@ async fn onebotv11_e2e() {
     );
 
     // 清理
-    let _ = child.kill();
+    drop(child); // Drop 守卫内部 kill+wait
 }
 
 mod util {
