@@ -363,7 +363,13 @@ pub async fn op_async(name: &str, args: J) -> J {
         "redis_ttl" => J::from(-1),
         "http" => http_op(&args).await,
         "e_reply" => {
-            let ret = EventGuard::get(&s("key")).and_then(|(bot, data)| {
+            let guarded = EventGuard::get(&s("key"));
+            crate::util::make_log1(
+                crate::logger::Level::Debug,
+                Some("reply"),
+                format!("e_reply op: key={} guarded={}", s("key"), guarded.is_some()),
+            );
+            let ret = guarded.and_then(|(bot, data)| {
                 let e = crate::plugins::plugin::E::new(bot, data);
                 let msg: J = serde_json::from_str(&s("msg")).unwrap_or(J::Null);
                 let opts: J = serde_json::from_str(&s("data")).unwrap_or(json!({}));
