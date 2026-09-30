@@ -115,16 +115,20 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
         "wrap" => FlexWrap::Wrap,
         _ => FlexWrap::NoWrap,
     };
-    let gap_parts = d("gap").map(|s| split_commas(&s)).unwrap_or_default();
+    let gap_parts = d("gap")
+        .map(|s| s.split_whitespace().map(String::from).collect())
+        .unwrap_or_default();
     let (gx, gy) = match gap_parts.len() {
         0 => ("0".into(), "0".into()),
         1 => (gap_parts[0].clone(), gap_parts[0].clone()),
         _ => (gap_parts[0].clone(), gap_parts[1].clone()),
     };
 
-    // padding/margin 简写展开
+    // padding/margin 简写展开（CSS 简写是空格分隔：12px 0 12px 50px）
     let sides = |name: &str| -> Vec<String> {
-        d(name).map(|s| split_commas(&s)).unwrap_or_default()
+        d(name)
+            .map(|s| s.split_whitespace().map(String::from).collect())
+            .unwrap_or_default()
     };
     let expand = |v: &[String], def: &str| -> (String, String, String, String) {
         match v.len() {
