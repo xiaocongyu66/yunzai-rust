@@ -20,6 +20,8 @@ use std::sync::Arc;
 
 /// 全局配置（loader 等模块引用）
 pub static GLOBAL_CFG: std::sync::OnceLock<Arc<Cfg>> = std::sync::OnceLock::new();
+/// 主 tokio runtime 的 Handle：napi 回调线程（无 tokio 上下文）执行 async op 时使用
+pub static GLOBAL_RT: std::sync::OnceLock<tokio::runtime::Handle> = std::sync::OnceLock::new();
 
 /// ≈ process.start_type
 pub static START_TYPE: Lazy<String> = Lazy::new(|| {
@@ -107,6 +109,7 @@ fn main() {
 
     // ≈ internal / external start
     let rt = tokio::runtime::Runtime::new().unwrap();
+    let _ = GLOBAL_RT.set(rt.handle().clone());
     rt.block_on(run());
 }
 

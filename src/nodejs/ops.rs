@@ -373,10 +373,11 @@ pub async fn op_async(name: &str, args: J) -> J {
                 let e = crate::plugins::plugin::E::new(bot, data);
                 let msg: J = serde_json::from_str(&s("msg")).unwrap_or(J::Null);
                 let opts: J = serde_json::from_str(&s("data")).unwrap_or(json!({}));
-                // reply_with 内部 spawn，直接阻塞当前 tokio worker 短暂执行是安全的（我们在运行时上下文）
-                tokio::runtime::Handle::try_current()
+                // 回调线程可能无 tokio 上下文 → 回退主 runtime Handle
+                let h = tokio::runtime::Handle::try_current()
                     .ok()
-                    .and_then(|h| tokio::task::block_in_place(|| h.block_on(e.reply_with(msg, args.get("quote").and_then(J::as_bool).unwrap_or(false), opts))).ok())
+                    .or_else(|| crate::GLOBAL_RT.get().cloned());
+                h.and_then(|h| tokio::task::block_in_place(|| h.block_on(e.reply_with(msg, args.get("quote").and_then(J::as_bool).unwrap_or(false), opts))).ok())
             });
             ret.unwrap_or(J::Null)
         }
