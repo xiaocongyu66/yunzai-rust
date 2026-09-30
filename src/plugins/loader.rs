@@ -261,6 +261,11 @@ impl PluginsLoader {
             e.data["game"] = json!("zzz");
             e.data["msg"] = json!(ZZZ_REG.replace(&msg, "#绝区零").to_string());
         }
+        crate::util::make_log1(
+            crate::logger::Level::Debug,
+            Some("Plugin"),
+            format!("deal: msg={:?} filtered={}", e.msg(), filtered.len()),
+        );
         // accept 链
         for p in &filtered {
             match &p.plugin {
@@ -277,6 +282,11 @@ impl PluginsLoader {
                         crate::nodejs::EventGuard::set(&data.reg_key, e.bot.clone(), e.data.clone());
                         engine.instantiate(&data.reg_key, &e.data).await;
                         let r = engine.accept(&data.reg_key, &e.data).await;
+                        crate::util::make_log1(
+                            crate::logger::Level::Debug,
+                            Some("Plugin"),
+                            format!("accept[{}]: {}", data.reg_key, r),
+                        );
                         crate::nodejs::EventGuard::clear(&data.reg_key);
                         if r == "return" {
                             return;
