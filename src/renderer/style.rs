@@ -8,6 +8,7 @@ use super::dom::StyleNode;
 use super::layout::parse_calc_pct_px;
 use lightningcss::properties::Property;
 use lightningcss::stylesheet::ParserOptions;
+use lightningcss::printer::PrinterOptions;
 use lightningcss::vendor_prefix::VendorPrefix;
 use taffy::geometry::Point;
 use taffy::prelude::*;
@@ -44,14 +45,14 @@ fn property_id_of(name: &str) -> Option<lightningcss::properties::PropertyId<'st
         "row-gap" => PropertyId::RowGap,
         "column-gap" => PropertyId::ColumnGap,
         "z-index" => PropertyId::ZIndex,
-        "flex-grow" => PropertyId::FlexGrow,
-        "flex-shrink" => PropertyId::FlexShrink,
+        "flex-grow" => PropertyId::FlexGrow(VendorPrefix::None),
+        "flex-shrink" => PropertyId::FlexShrink(VendorPrefix::None),
         "flex-basis" => PropertyId::FlexBasis(VendorPrefix::None),
-        "flex-direction" => PropertyId::FlexDirection,
-        "flex-wrap" => PropertyId::FlexWrap,
-        "justify-content" => PropertyId::JustifyContent,
-        "align-items" => PropertyId::AlignItems,
-        "align-content" => PropertyId::AlignContent,
+        "flex-direction" => PropertyId::FlexDirection(VendorPrefix::None),
+        "flex-wrap" => PropertyId::FlexWrap(VendorPrefix::None),
+        "justify-content" => PropertyId::JustifyContent(VendorPrefix::None),
+        "align-items" => PropertyId::AlignItems(VendorPrefix::None),
+        "align-content" => PropertyId::AlignContent(VendorPrefix::None),
         _ => return None,
     })
 }
@@ -244,20 +245,20 @@ fn apply(p: &Property, basis: f32, r: &mut Resolved) {
             }
         }
         P::Gap(g) => {
-            r.gap.width = tlp(&g.row, basis);
-            r.gap.height = tlp(&g.column, basis);
+            r.gap.width = gap_val(&g.row, basis);
+            r.gap.height = gap_val(&g.column, basis);
         }
-        P::RowGap(v) => r.gap.width = tlp(v, basis),
-        P::ColumnGap(v) => r.gap.height = tlp(v, basis),
+        P::RowGap(v) => r.gap.width = gap_val(v, basis),
+        P::ColumnGap(v) => r.gap.height = gap_val(v, basis),
         P::ZIndex(z) => {
             if let lightningcss::properties::position::ZIndex::Integer(i) = z {
                 r.z_index = *i;
             }
         }
-        P::FlexGrow(v) => r.flex_grow = *v,
-        P::FlexShrink(v) => r.flex_shrink = *v,
+        P::FlexGrow(v, _) => r.flex_grow = *v,
+        P::FlexShrink(v, _) => r.flex_shrink = *v,
         P::FlexBasis(v, _) => r.flex_basis = tlpa(v, basis).into_dim(),
-        P::FlexDirection(d) => {
+        P::FlexDirection(d, _) => {
             use lightningcss::properties::flex::FlexDirection::*;
             r.flex_direction = match d {
                 Row => FlexDirection::Row,
@@ -266,7 +267,7 @@ fn apply(p: &Property, basis: f32, r: &mut Resolved) {
                 ColumnReverse => FlexDirection::ColumnReverse,
             };
         }
-        P::FlexWrap(w) => {
+        P::FlexWrap(w, _) => {
             use lightningcss::properties::flex::FlexWrap::*;
             r.flex_wrap = match w {
                 Wrap => FlexWrap::Wrap,
@@ -274,7 +275,7 @@ fn apply(p: &Property, basis: f32, r: &mut Resolved) {
                 NoWrap => FlexWrap::NoWrap,
             };
         }
-        P::JustifyContent(j) => {
+        P::JustifyContent(j, _) => {
             use lightningcss::properties::align::AlignContent as LJ;
             r.justify_content = match j {
                 LJ::FlexStart => Some(JustifyContent::FlexStart),
@@ -287,7 +288,7 @@ fn apply(p: &Property, basis: f32, r: &mut Resolved) {
                 _ => None,
             };
         }
-        P::AlignItems(a) => {
+        P::AlignItems(a, _) => {
             use lightningcss::properties::align::AlignItems as LA;
             r.align_items = match a {
                 LA::FlexStart => Some(AlignItems::FlexStart),
@@ -298,7 +299,7 @@ fn apply(p: &Property, basis: f32, r: &mut Resolved) {
                 _ => None,
             };
         }
-        P::AlignContent(a) => {
+        P::AlignContent(a, _) => {
             use lightningcss::properties::align::AlignContent as LC;
             r.align_content = match a {
                 LC::FlexStart => Some(AlignContent::FlexStart),
@@ -315,6 +316,14 @@ fn apply(p: &Property, basis: f32, r: &mut Resolved) {
     }
 }
 
+
+fn gap_val(v: &lightningcss::properties::align::GapValue, basis: f32) -> LengthPercentage {
+    use lightningcss::properties::align::GapValue as GV;
+    match v {
+        GV::Normal => LengthPercentage::Length(0.0),
+        GV::LengthPercentage(lp) => tlp(lp, basis),
+    }
+}
 fn ov_str(s: &str) -> Overflow {
     match s.trim() {
         "hidden" | "clip" => Overflow::Hidden,
