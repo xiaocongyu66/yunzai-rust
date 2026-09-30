@@ -135,7 +135,7 @@ fn split_combinators(tok: &str) -> Vec<Combinator> {
 pub fn parse_declarations(s: &str) -> Vec<(String, String)> {
     // Lightning CSS：按规范解析并展开简写为 longhand（padding/background 等），失败回退手写解析
     match parse_declarations_lc(s) {
-        Some(out) if !out.is_empty() => out,
+        Some(out) if !out.is_empty() && out.iter().all(|(_, v)| !v.is_empty()) => out,
         _ => parse_declarations_legacy(s),
     }
 }
@@ -197,7 +197,7 @@ fn parse_declarations_lc(s: &str) -> Option<Vec<(String, String)>> {
             }
             other => {
                 // 通用：属性名 + 序列化值
-                if let Ok(v) = other.to_css_string(false, PrinterOptions::default()) {
+                if let Ok(v) = other.to_css_string(false, lc_opts()) {
                     out.push((name, v));
                 }
             }
@@ -206,11 +206,27 @@ fn parse_declarations_lc(s: &str) -> Option<Vec<(String, String)>> {
     Some(out)
 }
 
+/// 带浏览器 targets 的序列化选项（空 targets 会让部分属性序列化失败返回空）
+fn lc_opts() -> lightningcss::printer::PrinterOptions<'static> {
+    use lightningcss::targets::{Browsers, Targets};
+    lightningcss::printer::PrinterOptions {
+        targets: Targets {
+            browsers: Some(Browsers {
+                chrome: Some(120 << 16),
+                edge: Some(120 << 16),
+                firefox: Some(120 << 16),
+                safari: Some(17 << 16),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
 /// lightningcss 值 → 字符串（走 ToCss 序列化）
 fn lc_val<T: lightningcss::traits::ToCss>(v: &T) -> String {
-    use lightningcss::printer::PrinterOptions;
-    v.to_css_string(lightningcss::printer::PrinterOptions::<'_>::default())
-        .unwrap_or_default()
+    v.to_css_string(lc_opts()).unwrap_or_default()
 }
 
 
