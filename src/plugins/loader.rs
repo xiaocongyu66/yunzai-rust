@@ -248,9 +248,18 @@ impl PluginsLoader {
         if hook {
             return;
         }
-        // only_reply_at 门
-        if !truthy(&e.get("only_reply_at")) {
-            return;
+        // only_reply_at 门：开启配置时要求消息 @ 了机器人，未开启不拦截
+        if truthy(&e.get("only_reply_at")) {
+            let self_id = e.self_id();
+            let at_self = e.get("message").as_array().map(|arr| {
+                arr.iter().any(|seg| {
+                    seg.get("type").and_then(Value::as_str) == Some("at")
+                        && util::string(seg.get("data").unwrap_or(&Value::Null).get("qq").unwrap_or(&Value::Null)) == self_id
+                })
+            }).unwrap_or(false);
+            if !at_self {
+                return;
+            }
         }
         // 星铁/绝区零命令标准化
         let msg = e.msg();
