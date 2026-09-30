@@ -59,7 +59,7 @@ fn property_id_of(name: &str) -> Option<lightningcss::properties::PropertyId<'st
 }
 
 /// 解析单个 CSS 属性声明为 lightningcss Property（结构化值）
-pub fn parse_prop(name: &str, value: &str) -> Option<Property<'static>> {
+pub fn parse_prop<'a>(name: &str, value: &'a str) -> Option<Property<'a>> {
     let pid = property_id_of(name)?;
     Property::parse_string(pid, value, ParserOptions::default()).ok()
 }
