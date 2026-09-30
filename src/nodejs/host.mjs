@@ -181,9 +181,23 @@ function buildE(key, eJson) {
       // ≈ TRSS puppeteer 语义：retType 'base64' 返回 base64；
       //   'default'/'msgId' 直接 reply 图片并返回 msgId
       if (opts.retType === 'base64') return b64
-      log(2, `[render] 渲染成功 ${b64.length}b，reply 中`)
-      const mid = await e.reply(b64)
+      // NTQQ 对大 base64 WS 直传会超时 → 落盘真图片，用 file:// 路径发
+      const dir = `${process.cwd()}/data/render`
+      fs.mkdirSync(dir, { recursive: true })
+      const img = `${dir}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`
+      fs.writeFileSync(img, Buffer.from(b64, 'base64'))
+      log(2, `[render] 渲染成功 ${(b64.length / 1024) | 0}kb → ${img}`)
+      const mid = await e.reply(`file://${img}`)
       log(2, `[render] reply 完成: ${mid}`)
+      // 发送完成后清理本图；render/ 目录中超过 1 小时的残留图也顺带清掉
+      try {
+        fs.rmSync(img, { force: true })
+        const now = Date.now()
+        for (const f of fs.readdirSync(dir)) {
+          const p = `${dir}/${f}`
+          if (now - fs.statSync(p).mtimeMs > 3600_000) fs.rmSync(p, { force: true })
+        }
+      } catch {}
       return mid ?? true
     },
   }
