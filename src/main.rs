@@ -58,15 +58,16 @@ fn main() {
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|| ".".into());
                 match crate::renderer::render(&html, width, &[], &base) {
-                Ok(png) => {
-                    std::fs::write(out, &png).ok();
-                    println!("OK {} -> {} ({} bytes)", file, out, png.len());
+                    Ok(png) => {
+                        std::fs::write(out, &png).ok();
+                        println!("OK {} -> {} ({} bytes)", file, out, png.len());
+                    }
+                    Err(e) => {
+                        eprintln!("render error: {}", e);
+                        std::process::exit(1);
+                    }
                 }
-                Err(e) => {
-                    eprintln!("render error: {}", e);
-                    std::process::exit(1);
-                }
-            },
+            }
             Err(e) => {
                 eprintln!("read error: {}", e);
                 std::process::exit(1);
