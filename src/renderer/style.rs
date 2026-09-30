@@ -9,6 +9,7 @@ use super::layout::parse_calc_pct_px;
 use lightningcss::properties::Property;
 use lightningcss::stylesheet::ParserOptions;
 use lightningcss::printer::PrinterOptions;
+use lightningcss::traits::ToCss;
 use lightningcss::vendor_prefix::VendorPrefix;
 use taffy::geometry::Point;
 use taffy::prelude::*;
@@ -219,10 +220,12 @@ fn apply(p: &Property, basis: f32, r: &mut Resolved) {
         P::Display(d) => {
             use lightningcss::properties::display::{Display as LD, DisplayInside};
             r.display = match d {
-                LD::None => Display::None,
-                LD::Inside(DisplayInside::Flex(_)) => Display::Flex,
-                LD::Inside(DisplayInside::Grid) => Display::Grid,
-                _ => Display::Flex,
+                LD::Keyword(_) => Display::None,
+                LD::Pair(p) => match p.inside {
+                    DisplayInside::Flex(_) => Display::Flex,
+                    DisplayInside::Grid => Display::Grid,
+                    _ => Display::Flex,
+                },
             };
         }
         P::Position(pos) => {
