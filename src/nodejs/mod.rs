@@ -176,6 +176,15 @@ impl JsEngine {
     pub async fn new() -> anyhow::Result<JsEngine> {
         let cfg = crate::GLOBAL_CFG.get();
         let (lib_path, _fresh) = manager::ensure_libnode(cfg.map(|c| &**c)).await?;
+        // 先 dlopen libnode（RTLD_GLOBAL）：桥的 napi_* 未定义符号必须能解析到它，
+        // 否则内存加载的 probe 必失败（内嵌桥 probe 先于 embed::start）
+        {
+            use libloading::os::unix::{Library as UnixLib, RTLD_GLOBAL, RTLD_LAZY};
+            match unsafe { UnixLib::open(Some(&lib_path), RTLD_LAZY | RTLD_GLOBAL) } {
+                Ok(lib) => std::mem::forget(lib), // 常驻；embed::start 再次 open 同镜像
+                Err(e) => anyhow::bail!("libnode 预加载失败: {e}"),
+            }
+        }
         // bridge.node / host.mjs 运行时文件（先建缓存目录，tempdir 场景不预置）
         let _ = std::fs::create_dir_all(manager::cache_dir());
         // 桥优先 memfd 内存直载（不落盘）；空内嵌回退发行包文件。
