@@ -244,30 +244,27 @@ async function loadPlugin(absPath, key) {
   const metas = []
   try {
     const mod = await import(`file://${absPath.startsWith('/') ? absPath : '/' + absPath}`)
-    for (const [name, Def] of Object.entries(mod)) {
-      // ≈ TRSS loader 同款：export 的值若带 .apps 子对象（miao 格式）则展开，
-      //   否则按直接 export 的插件定义处理
-      const bundle = (Def && typeof Def === 'object' && Def.apps) ? Def.apps : { [name]: Def }
-      for (const [subName, Cls] of Object.entries(bundle)) {
+    // ≈ TRSS loader 同款：module.apps 存在（miao 等聚合导出）则展开，否则用 module 本身
+    const app = mod.apps ? { ...mod.apps } : mod
+    for (const [name, Cls] of Object.entries(app)) {
       const isCls = typeof Cls === 'function' && Cls.prototype
       if (!isCls) continue
       let inst
       try { inst = new Cls() } catch { continue }
       let skip = false
       if (typeof inst.init === 'function') {
-        try { if ((await inst.init()) === 'return') skip = true } catch (e) { log(3, `${key}.${subName} init 异常: ${e?.stack || e?.message || e}`); skip = true }
+        try { if ((await inst.init()) === 'return') skip = true } catch (e) { log(3, `${key}.${name} init 异常: ${e?.stack || e?.message || e}`); skip = true }
       }
       if (skip) continue
-      const regKey = `${key}::${subName}`
+      const regKey = `${key}::${name}`
       const rules = Array.isArray(inst.rule) ? inst.rule.map((r) => ({
         reg_src: String(r.reg ?? ''), fnc: String(r.fnc ?? ''), log: !!r.log,
         permission: String(r.permission ?? 'all'), event: r.event ? String(r.event) : null,
       })) : []
       const tasks = inst.task && inst.task.cron ? [{ name: String(inst.task.name ?? name), cron: String(inst.task.cron), fnc: String(inst.task.fnc ?? ''), log: !!inst.task.log }] : []
-      registry.set(regKey, { cls: Cls, name: subName, key })
-      metas.push({ reg_key: regKey, sub: subName, name: String(inst.name ?? subName), dsc: String(inst.dsc ?? ''),
-        event: String(inst.event ?? 'message'), priority: Number(inst.priority ?? 5000), rules, tasks, _plugin: String(inst.name ?? subName) })
-      }
+      registry.set(regKey, { cls: Cls, name, key })
+      metas.push({ reg_key: regKey, sub: name, name: String(inst.name ?? name), dsc: String(inst.dsc ?? ''),
+        event: String(inst.event ?? 'message'), priority: Number(inst.priority ?? 5000), rules, tasks, _plugin: String(inst.name ?? name) })
     }
   } catch (e) {
     log(3, `插件加载失败 ${key}: ${e?.stack || e?.message || e}`)
