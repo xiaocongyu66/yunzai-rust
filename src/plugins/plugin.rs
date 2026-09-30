@@ -210,7 +210,7 @@ impl E {
             return Ok(json!(false));
         }
         // ≈ TRSS segment 语义：纯 base64 大字符串按图片发（渲染器返回值）
-        if let J::String(ref raw) = msg {
+        if let serde_json::Value::String(ref raw) = msg {
             if raw.len() > 512
                 && raw.starts_with("iVBOR")
                 && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
