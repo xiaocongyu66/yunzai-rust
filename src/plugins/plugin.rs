@@ -211,11 +211,14 @@ impl E {
         }
         // ≈ TRSS segment 语义：纯 base64 大字符串按图片发（渲染器返回值）
         if let serde_json::Value::String(ref raw) = msg {
-            if raw.len() > 512
+            let is_b64 = raw.len() > 512
                 && raw.starts_with("iVBOR")
-                && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
-            {
+                && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=');
+            if is_b64 {
                 msg = crate::segment::image(format!("base64://{}", raw), None);
+            } else if raw.starts_with("file://") {
+                // 本地文件路径 → 图片段（TRSS segment 语义）
+                msg = crate::segment::image(raw.clone(), None);
             }
         }
         let mut msg = msg;

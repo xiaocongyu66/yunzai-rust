@@ -187,7 +187,7 @@ function buildE(key, eJson) {
       const img = `${dir}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`
       fs.writeFileSync(img, Buffer.from(b64, 'base64'))
       log(2, `[render] 渲染成功 ${(b64.length / 1024) | 0}kb → ${img}`)
-      const mid = await e.reply(`file://${img}`)
+      const mid = await e.reply({ type: 'image', file: `file://${img}` })
       log(2, `[render] reply 完成: ${mid}`)
       // 发送完成后清理本图；render/ 目录中超过 1 小时的残留图也顺带清掉
       try {
