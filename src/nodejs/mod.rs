@@ -34,6 +34,78 @@ fn node_cfg(cfg: Option<&crate::config::Cfg>) -> (bool, u32, u64) {
 pub const EMBED_BRIDGE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/yz_bridge.node"));
 
 
+/// Linux memfd 匿名内存桥 → /dev/fd/<fd>
+#[cfg(target_os = "linux")]
+fn memfd_bridge() -> Option<PathBuf> {
+    use std::io::Write;
+    use std::os::fd::FromRawFd;
+    extern "C" {
+        fn memfd_create(name: *const u8, flags: u32) -> i32;
+        fn ftruncate(fd: i32, length: i64) -> i32;
+    }
+    let fd = unsafe { memfd_create(b"yz_bridge.node\0".as_ptr(), 0x0001) };
+    if fd < 3 {
+        return None;
+    }
+    let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+    file.write_all(EMBED_BRIDGE).ok()?;
+    file.flush().ok()?;
+    if unsafe { ftruncate(fd, EMBED_BRIDGE.len() as i64) } != 0 {
+        return None;
+    }
+    std::mem::forget(file); // fd 保活（node require 与 dlopen 都要读它）
+    let p = PathBuf::from(format!("/dev/fd/{fd}"));
+    if probe_bridge(&p) {
+        Some(p)
+    } else {
+        None
+    }
+}
+
+/// macOS shm 匿名内存桥（open+unlink → /dev/fd/<fd>）
+#[cfg(target_os = "macos")]
+fn shm_bridge() -> Option<PathBuf> {
+    use std::io::Write;
+    use std::os::fd::FromRawFd;
+    extern "C" {
+        fn shm_open(name: *const u8, oflag: i32, mode: u32) -> i32;
+        fn shm_unlink(name: *const u8) -> i32;
+        fn ftruncate(fd: i32, length: i64) -> i32;
+    }
+    // O_CREAT|O_RDWR = 0x0002|0x0002 = 0x0002 (O_CREAT=0x0400 on mac? 实际
+    // macOS: O_CREAT=0x0400, O_RDWR=0x0002) → 0x0402；mode 0600
+    let fd = unsafe { shm_open(b"/yz_bridge\0".as_ptr(), 0x0402, 0o600) };
+    if fd < 3 {
+        return None;
+    }
+    unsafe { shm_unlink(b"/yz_bridge\0".as_ptr()) }; // 名字立即消失 → 匿名
+    let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+    file.write_all(EMBED_BRIDGE).ok()?;
+    file.flush().ok()?;
+    if unsafe { ftruncate(fd, EMBED_BRIDGE.len() as i64) } != 0 {
+        return None;
+    }
+    std::mem::forget(file);
+    let p = PathBuf::from(format!("/dev/fd/{fd}"));
+    if probe_bridge(&p) {
+        Some(p)
+    } else {
+        None
+    }
+}
+
+/// dlopen 试探（成功即保留句柄：embed.rs 再次 open 同路径得同一镜像）
+fn probe_bridge(path: &Path) -> bool {
+    use libloading::os::unix::{Library as UnixLib, RTLD_LAZY};
+    match unsafe { UnixLib::open(Some(path), RTLD_LAZY) } {
+        Ok(lib) => {
+            std::mem::forget(lib);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 /// 内嵌桥三级内存加载（照搬 ccb embedded-stage 实证策略，按"尽可能不落盘"排序）：
 ///
 /// 1. memfd_create → /dev/fd/<fd>——内核匿名内存，零文件对象。仅正常 Linux
@@ -51,48 +123,30 @@ pub const EMBED_BRIDGE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/yz_bri
 fn load_embedded_bridge() -> anyhow::Result<PathBuf> {
     use libloading::os::unix::{Library as UnixLib, RTLD_LAZY};
 
-    // dlopen 试探：成功即保留该句柄（leak 成进程级持久引用，embed.rs 再次
-    // open 同路径得到同一镜像）
-    fn probe(path: &Path) -> bool {
-        match unsafe { UnixLib::open(Some(path), RTLD_LAZY) } {
-            Ok(lib) => {
-                std::mem::forget(lib);
-                true
-            }
-            Err(_) => false,
-        }
-    }
-
-    // 1. memfd → /dev/fd/<fd>（Linux 专属 syscall；macOS 无此符号，unix 门会炸链接）
+    // 1. Linux：memfd_create → /dev/fd/<fd>（内核匿名内存，零文件对象）
     #[cfg(target_os = "linux")]
-    if let Some(p) = (|| -> Option<PathBuf> {
-        use std::io::Write;
-        use std::os::fd::FromRawFd;
-        extern "C" {
-            fn memfd_create(name: *const u8, flags: u32) -> i32;
-            fn ftruncate(fd: i32, length: i64) -> i32;
-        }
-        let fd = unsafe { memfd_create(b"yz_bridge.node\0".as_ptr(), 0x0001) };
-        if fd < 3 {
-            return None;
-        }
-        let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
-        file.write_all(EMBED_BRIDGE).ok()?;
-        file.flush().ok()?;
-        if unsafe { ftruncate(fd, EMBED_BRIDGE.len() as i64) } != 0 {
-            return None;
-        }
-        std::mem::forget(file); // fd 保活（node require 与 dlopen 都要读它）
-        let p = PathBuf::from(format!("/dev/fd/{fd}"));
-        if probe(&p) {
-            Some(p)
-        } else {
-            None
-        }
-    })() {
+    if let Some(p) = memfd_bridge() {
         return Ok(p);
     }
-    crate::util::make_log1(crate::logger::Level::Info, Some("Node"), "memfd 不可用（proot/老内核？）→ tmpfs 降级");
+    #[cfg(target_os = "linux")]
+    crate::util::make_log1(crate::logger::Level::Info, Some("Node"), "memfd 不可用（proot/老内核？）→ shm 降级");
+
+    // 1'. macOS：shm_open + 立即 shm_unlink = 匿名内存对象（名字已消失，
+    //     对象随 fd 生命周期，语义等价 memfd），/dev/fd/<fd> 喂 dlopen
+    #[cfg(target_os = "macos")]
+    if let Some(p) = shm_bridge() {
+        return Ok(p);
+    }
+    #[cfg(target_os = "macos")]
+    crate::util::make_log1(crate::logger::Level::Info, Some("Node"), "shm 匿名加载不可用 → tmpfs 降级");
+
+    // 2./3. tmpfs / tmpdir（磁盘零写路径：/dev/shm 与多数 tmpdir 是 RAM 介质；
+    //    Windows 无内存 dlopen 路径（LoadLibrary 架构性只收路径），保留 temp 兜底）
+    let mut bases: Vec<PathBuf> = vec![];
+    if cfg!(target_os = "linux") || cfg!(target_os = "macos") {
+        bases.push("/dev/shm".into());
+    }
+    bases.push(std::env::temp_dir());
 
     // 2./3. tmpfs / tmpdir（写固定名文件，覆盖式）
     let mut bases: Vec<PathBuf> = vec!["/dev/shm".into()];
@@ -105,7 +159,7 @@ fn load_embedded_bridge() -> anyhow::Result<PathBuf> {
                 use std::os::unix::fs::PermissionsExt;
                 let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o700));
             }
-            if probe(&p) {
+            if probe_bridge(&p) {
                 crate::util::make_log1(crate::logger::Level::Info, Some("Node"), format!("内嵌桥经 tmpfs 加载: {}", p.display()));
                 return Ok(p);
             }
