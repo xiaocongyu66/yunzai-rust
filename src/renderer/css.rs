@@ -156,7 +156,7 @@ fn parse_declarations_legacy(s: &str) -> Vec<(String, String)> {
 
 /// Lightning CSS 解析：结构化声明 → longhand 字符串表
 fn parse_declarations_lc(s: &str) -> Option<Vec<(String, String)>> {
-    use lightningcss::options::PrinterOptions;
+    use lightningcss::printer::PrinterOptions;
     use lightningcss::properties::Property;
     use lightningcss::stylesheet::{ParserOptions, StyleSheet};
     let src = format!("a{{ {} }}", s);
@@ -208,8 +208,8 @@ fn parse_declarations_lc(s: &str) -> Option<Vec<(String, String)>> {
 
 /// lightningcss 值 → 字符串（走 ToCss 序列化）
 fn lc_val<T: lightningcss::traits::ToCss>(v: &T) -> String {
-    use lightningcss::options::PrinterOptions;
-    v.to_css_string(PrinterOptions::default())
+    use lightningcss::printer::PrinterOptions;
+    v.to_css_string(lightningcss::printer::PrinterOptions::<'_>::default())
         .unwrap_or_default()
 }
 
