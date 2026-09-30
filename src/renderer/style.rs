@@ -207,10 +207,10 @@ fn apply(p: &Property, basis: f32, r: &mut Resolved) {
             r.margin.left = tlpa(&m.left, basis);
         }
         P::Padding(pd) => {
-            r.padding.top = tlp(&pd.top, basis);
-            r.padding.right = tlp(&pd.right, basis);
-            r.padding.bottom = tlp(&pd.bottom, basis);
-            r.padding.left = tlp(&pd.left, basis);
+            r.padding.top = tlpa(&pd.top, basis).into_lp();
+            r.padding.right = tlpa(&pd.right, basis).into_lp();
+            r.padding.bottom = tlpa(&pd.bottom, basis).into_lp();
+            r.padding.left = tlpa(&pd.left, basis).into_lp();
         }
         P::Top(v) => r.inset.top = tlpa(v, basis),
         P::Right(v) => r.inset.right = tlpa(v, basis),
@@ -346,6 +346,19 @@ fn ov_str(s: &str) -> Overflow {
     }
 }
 
+
+trait IntoLp {
+    fn into_lp(self) -> LengthPercentage;
+}
+impl IntoLp for LengthPercentageAuto {
+    fn into_lp(self) -> LengthPercentage {
+        match self {
+            LengthPercentageAuto::Length(l) => LengthPercentage::Length(l),
+            LengthPercentageAuto::Percent(p) => LengthPercentage::Percent(p),
+            LengthPercentageAuto::Auto => LengthPercentage::Length(0.0),
+        }
+    }
+}
 trait IntoDim {
     fn into_dim(self) -> Dimension;
 }
