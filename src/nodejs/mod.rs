@@ -65,16 +65,29 @@ impl JsEngine {
         let (lib_path, _fresh) = manager::ensure_libnode(cfg.map(|c| &**c)).await?;
         // bridge.node / host.mjs 运行时文件（先建缓存目录，tempdir 场景不预置）
         let _ = std::fs::create_dir_all(manager::cache_dir());
-        let bridge_path = manager::cache_dir().join("yz_bridge.node");
-        if EMBED_BRIDGE.len() > 0 {
-            std::fs::write(&bridge_path, EMBED_BRIDGE).map_err(|e| anyhow::anyhow!("写出内嵌 bridge 失败: {e}"))?;
-        } else if let Some(bundled) = find_bundled_bridge() {
-            std::fs::copy(&bundled, &bridge_path).map_err(|e| anyhow::anyhow!("拷贝 bridge 失败: {e}"))?;
+        // 桥优先 memfd 内存直载（不落盘）；空内嵌回退发行包文件。
+        // node 侧 require 相对 host.mjs 解析 → 路径必须绝对
+        let bridge_path = if !EMBED_BRIDGE.is_empty() {
+            #[cfg(unix)]
+            {
+                load_embedded_bridge_in_memory()?
+            }
+            #[cfg(not(unix))]
+            {
+                let p = manager::cache_dir().join("yz_bridge.node");
+                std::fs::write(&p, EMBED_BRIDGE).map_err(|e| anyhow::anyhow!("写出内嵌 bridge 失败: {e}"))?;
+                p
+            }
         } else {
-            return Err(anyhow::anyhow!(
-                "yz_bridge.node 缺失（内嵌为空且发行包 lib/ 无此文件）"
-            ));
-        }
+            let p = manager::cache_dir().join("yz_bridge.node");
+            match find_bundled_bridge() {
+                Some(b) => {
+                    std::fs::copy(&b, &p).map_err(|e| anyhow::anyhow!("拷贝 bridge 失败: {e}"))?;
+                    std::env::current_dir().map(|c| c.join(&p)).unwrap_or(p)
+                }
+                None => anyhow::bail!("yz_bridge.node 缺失（内嵌为空且发行包 lib/ 无此文件）"),
+            }
+        };
         let host_path = manager::cache_dir().join("host.mjs");
         std::fs::write(&host_path, HOST_MJS)?;
         // 生态路径映射：社区插件普遍 `import cfg from "../../lib/config/config.js"`——磁盘写真实模块
