@@ -405,7 +405,17 @@ fn write_eco_shims(root: &Path, bridge: &str) -> anyhow::Result<()> {
     let cfg_js = r#"// 生态映射：TRSS-Yunzai 的 cfg 门面（经 yz-bridge 与 Rust 主进程通信）
 import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
-const bridge = require({bridge})
+let bridge
+{{
+  const p = {bridge}
+  if (p.startsWith('/dev/fd/') || p.startsWith('/proc/self/fd/')) {{
+    const m = {{ exports: {{}} }}
+    process.dlopen(m, p)
+    bridge = m.exports
+  }} else {{
+    bridge = require(p)
+  }}
+}}
 const parse = (s) => { try { return JSON.parse(s) } catch { return null } }
 const cfgProxy = new Proxy({}, {
   get(_, prop) {

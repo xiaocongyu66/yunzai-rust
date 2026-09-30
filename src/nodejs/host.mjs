@@ -13,7 +13,16 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 
 const bridgePath = process.argv[process.argv.length - 1]
-const bridge = require(bridgePath)
+// 内存桥（/dev/fd/N memfd）必须 process.dlopen 直载：require 内部 realpath 会
+// 把 fd 路径解析成 memfd 假名（/memfd:xxx (deleted)）然后 lstat ENOENT
+let bridge
+if (bridgePath.startsWith('/dev/fd/') || bridgePath.startsWith('/proc/self/fd/')) {
+  const mod = { exports: {} }
+  process.dlopen(mod, bridgePath)
+  bridge = mod.exports
+} else {
+  bridge = require(bridgePath)
+}
 
 // ============ process.exit 拦截（插件不得杀整进程） ============
 const _reallyExit = process.reallyExit?.bind(process)
