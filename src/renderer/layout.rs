@@ -213,7 +213,11 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
     }
 }
 
-fn text_info(n: &StyleNode, default_size: f32) -> (f32, u16, [u8; 4], f32, TextAlign, Option<String>) {
+fn text_info(
+    n: &StyleNode,
+    default_size: f32,
+    parent_align: TextAlign,
+) -> (f32, u16, [u8; 4], f32, TextAlign, Option<String>) {
     let font_size = n
         .decl("font-size")
         .and_then(|v| v.trim().trim_end_matches("px").parse().ok())
@@ -240,7 +244,11 @@ fn text_info(n: &StyleNode, default_size: f32) -> (f32, u16, [u8; 4], f32, TextA
             .find(|s| !s.is_empty() && !matches!(*s, "sans-serif" | "serif" | "monospace" | "system-ui"))
             .map(String::from)
     });
-    let align = TextAlign::parse(n.decl("text-align").unwrap_or("left"));
+    // text-align 可继承：自身未声明时用父级
+    let align = match n.decl("text-align") {
+        Some(v) => TextAlign::parse(v),
+        None => parent_align,
+    };
     (font_size, weight, color, lh, align, family)
 }
 
@@ -253,10 +261,11 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
         n: &StyleNode,
         width: f32,
         parent_font: f32,
+        parent_align: TextAlign,
         base_dir: &str,
     ) -> Result<taffy::NodeId, String> {
         let st = style_of(n, width);
-        let (font_size, weight, color, lh, align, family) = text_info(n, parent_font);
+        let (font_size, weight, color, lh, align, family) = text_info(n, parent_font, parent_align);
         let base_ctx = NodeCtx {
             decls: n.decls.clone(),
             text: n.text.clone(),
@@ -282,7 +291,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
         // 容器
         let mut child_ids = Vec::new();
         for c in &n.children {
-            child_ids.push(add(taffy, fonts, c, width, font_size, base_dir)?);
+            child_ids.push(add(taffy, fonts, c, width, font_size, align, base_dir)?);
         }
         // 混合节点：自身文本作为附加叶子（尺寸由 measure 决定）
         if !n.text.is_empty() {
@@ -322,7 +331,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
         Ok(id)
     }
 
-    let root_id = add(&mut taffy, fonts, root, width, 16.0, base_dir)?;
+    let root_id = add(&mut taffy, fonts, root, width, 16.0, TextAlign::Left, base_dir)?;
     Ok(Tree { taffy, root: root_id })
 }
 
