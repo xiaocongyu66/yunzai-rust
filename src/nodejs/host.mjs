@@ -155,14 +155,13 @@ function buildE(key, eJson) {
   e.group = () => contact(e, 'group')
   e.member = () => ({ ...contact(e, 'friend'), getInfo: async () => op('friend_info', { self_id: e.self_id, user_id: e.user_id }) })
   e.bot = globalThis.Bot
-  // ≈ e.runtime.render — handlebars 模板 → 自研渲染器 op → base64 png（所有事件通用）
+  // ≈ e.runtime.render — art-template（TRSS 同款引擎）→ 自研渲染器 op → base64 png
   e.runtime = {
     render: async (plugin, tplPath, params, opts = {}) => {
       const fs = await import('node:fs')
-      const Handlebars = (await import('handlebars')).default
+      const art = (await import('art-template')).default
       const base = `${process.cwd()}/plugins/${plugin}/resources/${tplPath}`
       const file = fs.existsSync(base) ? base : `${base}.html`
-      const tpl = fs.readFileSync(file, 'utf-8')
       const data = { ...params }
       if (typeof opts.beforeRender === 'function') {
         const extra = opts.beforeRender({ data: {
@@ -171,7 +170,7 @@ function buildE(key, eJson) {
         } })
         Object.assign(data, extra ?? {})
       }
-      const html = Handlebars.compile(tpl)(data)
+      const html = art(file, data)
       const r = await op('render', { html, width: opts.scale ? Math.round(720 * opts.scale) : 720 })
       return r?.data ?? null
     },
