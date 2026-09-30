@@ -436,6 +436,7 @@ export { cfgProxy as config, cfgProxy as cfg }
     std::fs::create_dir_all(&plg_dir)?;
     std::fs::write(plg_dir.join("plugin.js"), "export default globalThis.plugin
 ")?;
+    std::fs::write(plg_dir.join("loader.js"), "export default globalThis.plugin\n")?;
     let cmn_dir = root.join("lib/common");
     std::fs::create_dir_all(&cmn_dir)?;
     std::fs::write(cmn_dir.join("common.js"), "export default {}
