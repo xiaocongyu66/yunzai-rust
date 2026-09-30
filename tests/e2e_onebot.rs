@@ -49,6 +49,15 @@ impl Drop for LogDumper {
 #[tokio::test]
 async fn onebotv11_e2e() {
     let _dumper = LogDumper;
+    // 清理上一轮 panic 残留的子进程（幂等）
+    {
+        use tokio::io::AsyncWriteExt;
+        if let Ok(mut st) = tokio::net::TcpStream::connect(("127.0.0.1", PORT)).await {
+            let _ = st.write_all(format!("GET /exit HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n", PORT).as_bytes()).await;
+            let _ = st.flush().await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    }
     // 1. 准备临时运行目录
     let dir = tempfile::tempdir().unwrap();
     let cfg_dir = dir.path().join("config/config");
@@ -74,13 +83,22 @@ async fn onebotv11_e2e() {
     .unwrap();
 
     // 2. 启动主程序（无 Redis、无 TTY；LIBNODE_SKIP=1 —— E2E 测协议层，JS 引擎不参与，避免自动下载阻塞适配器注册）
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_yunzai"))
+    // Drop 守卫：panic 时杀掉子进程（否则残留占端口，下一轮测试连到将死实例）
+    struct ChildGuard(std::process::Child);
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let child = std::process::Command::new(env!("CARGO_BIN_EXE_yunzai"))
         .current_dir(dir.path())
         .env("YZ_NO_REDIS", "1")
         .env("LIBNODE_SKIP", "1")
         .stdout(std::fs::File::create("/tmp/e2e-child.log").unwrap())
         .stderr(std::fs::File::create("/tmp/e2e-child-err.log").unwrap())
         .spawn()
+        .map(ChildGuard)
         .unwrap();
 
     // 3. 等待端口就绪
