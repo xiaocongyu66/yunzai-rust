@@ -15,7 +15,8 @@ use serde_json::Value;
 
 /// 渲染 HTML → PNG。宽度默认 720，高度按内容自适应（上限 4096）。
 pub fn render(html: &str, width: u32, font_dirs: &[String]) -> Result<Vec<u8>, String> {
-    let width = width.clamp(64, 2048) as f32;
+    // 支持到 4K（3840）：宽度上限 4096；高度按内容自适应，保护上限 = 宽×4（防内存爆）
+    let width = width.clamp(64, 4096) as f32;
 
     // 1. 解析 DOM + 收集样式（<style> 块 + inline style + 选择器匹配）
     let (root_node, rules) = dom::parse(html)?;
@@ -27,7 +28,7 @@ pub fn render(html: &str, width: u32, font_dirs: &[String]) -> Result<Vec<u8>, S
     // 3. 布局（按宽度约束算内容高度）
     let tree = layout::build_tree(&styled, width, &mut fonts)?;
     let (root_paint, total_h) = layout::compute(tree, width)?;
-    let height = (total_h.ceil() as u32).clamp(1, 4096);
+    let height = (total_h.ceil() as u32).clamp(1, (width as u32) * 4);
 
     // 4. 光栅化
     paint::paint(&root_paint, width, height as f32, &mut fonts)

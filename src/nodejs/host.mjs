@@ -171,7 +171,8 @@ function buildE(key, eJson) {
         Object.assign(data, extra ?? {})
       }
       const html = art(file, data)
-      const r = await op('render', { html, width: opts.scale ? Math.round(720 * opts.scale) : 720 })
+      // ≈ TRSS puppeteer viewport 基准 1280：width = 1280 * scale（scale=3 即 4K）
+      const r = await op('render', { html, width: opts.scale ? Math.round(1280 * opts.scale) : 1280 })
       const b64 = r?.data ?? null
       if (!b64) {
         log(3, `[render] 渲染失败: ${r?.error ?? '无输出'}`)
