@@ -273,7 +273,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
         }
 
         if child_ids.is_empty() {
-            // img 叶子：有 src 时按图片固有尺寸（或声明尺寸）
+            let mut st = st;
             if n.tag == "img" {
                 if let Some(src) = &n.src {
                     if let Some(pm) = crate::renderer::media::load(src, base_dir) {

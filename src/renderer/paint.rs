@@ -296,7 +296,6 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
             v.split(',')
                 .map(|s| s.trim().trim_matches(['"', '\'']))
                 .find(|s| !s.is_empty() && !matches!(*s, "sans-serif" | "serif" | "monospace" | "system-ui"))
-                .copied()
         }),
     );
     // 水平对齐偏移：逐行用本行 line_w（用整段最宽行会让短行错位）
@@ -396,7 +395,10 @@ fn blit(pixmap: &mut Pixmap, img: &Pixmap, dx: f32, dy: f32, dw: f32, dh: f32, c
         for px in x0..x1 {
             let sx = ((px as f32 - dx) / dw * iw).floor().clamp(0.0, iw - 1.0) as u32;
             let sy = ((py as f32 - dy) / dh * ih).floor().clamp(0.0, ih - 1.0) as u32;
-            let c = img.pixel(sx, sy).unwrap_or(tiny_skia::Color::TRANSPARENT);
+            let c = match img.pixel(sx, sy) {
+                Some(c) => c,
+                None => continue,
+            };
             if c.a() == 0 {
                 continue;
             }
@@ -404,13 +406,11 @@ fn blit(pixmap: &mut Pixmap, img: &Pixmap, dx: f32, dy: f32, dw: f32, dh: f32, c
             if ux >= pixmap.width() || uy >= pixmap.height() {
                 continue;
             }
+            // 源（premul）直接与目标（premul）做 src-over
             let idx = (uy * pixmap.width() + ux) as usize;
             let data = pixmap.data_mut();
             let di = idx * 4;
-            let sa = c.a() as u32;
-            let sr = (c.r() as u32 * sa + 127) / 255;
-            let sg = (c.g() as u32 * sa + 127) / 255;
-            let sb = (c.b() as u32 * sa + 127) / 255;
+            let (sr, sg, sb, sa) = (c.r() as u32, c.g() as u32, c.b() as u32, c.a() as u32);
             let dr = data[di] as u32;
             let dg = data[di + 1] as u32;
             let db = data[di + 2] as u32;

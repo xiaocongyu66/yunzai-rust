@@ -52,7 +52,12 @@ fn main() {
         let out = args.get(2).map(String::as_str).unwrap_or("/tmp/test.png");
         let width: u32 = args.get(3).and_then(|a| a.parse().ok()).unwrap_or(720);
         match std::fs::read_to_string(file) {
-            Ok(html) => match crate::renderer::render(&html, width, &[]) {
+            Ok(html) => {
+                let base = std::path::Path::new(file)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| ".".into());
+                match crate::renderer::render(&html, width, &[], &base) {
                 Ok(png) => {
                     std::fs::write(out, &png).ok();
                     println!("OK {} -> {} ({} bytes)", file, out, png.len());
