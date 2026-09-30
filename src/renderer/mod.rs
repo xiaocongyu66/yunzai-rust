@@ -29,12 +29,33 @@ pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> R
     let mut styled = css::apply_styles(root_node, &css_rules);
     css::apply_pseudo(&mut styled, &pseudo_rules);
 
+    // 诊断：样式收集统计（link 读取 / faces 解析）
+    crate::util::make_log1(
+        crate::logger::Level::Info,
+        Some("Renderer"),
+        format!(
+            "样式收集：rules={} faces={} 别名前字体={}",
+            css_rules.len(),
+            font_faces.len(),
+            fonts.font_aliases.len()
+        ),
+    );
+
     // 2. 字体系统（先加载插件字体，再注册 @font-face 别名）
     let mut fonts = text::TextEngine::load(font_dirs)?;
     for (fam, url) in &font_faces {
         let path = crate::renderer::media::resolve(url, base_dir);
         fonts.load_face_file(&path, fam);
     }
+    crate::util::make_log1(
+        crate::logger::Level::Info,
+        Some("Renderer"),
+        format!(
+            "font-face 加载完成：faces={:?} 别名={:?}",
+            font_faces.iter().map(|(f, u)| format!("{f}←{u}")).collect::<Vec<_>>(),
+            fonts.font_aliases
+        ),
+    );
     // font-family 别名替换（@font-face 引用名 → 字体内部真实名）
     let styled = css::apply_font_aliases(styled, &fonts);
 

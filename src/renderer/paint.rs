@@ -189,6 +189,108 @@ pub fn paint(root: &PaintNode, width: f32, height: f32, fonts: &mut super::text:
     pixmap.encode_png().map_err(|e| e.to_string())
 }
 
+
+/// transform 声明 → tiny_skia 变换矩阵（按函数顺序从左到右组合）
+fn parse_transform(decl: &str, w: f32, h: f32) -> Option<Transform> {
+    let mut m = Transform::identity();
+    let mut found = false;
+    let bytes: Vec<char> = decl.chars().collect();
+    let text: String = bytes.iter().collect();
+    // 逐个 function(arg...) 扫描
+    let mut rest = text.as_str();
+    while let Some(open) = rest.find('(') {
+        let name = rest[..open].trim().trim_start_matches(',').trim().to_lowercase();
+        let after = &rest[open + 1..];
+        let Some(close) = after.find(')') else { break };
+        let args_s = after[..close].trim();
+        rest = &after[close + 1..];
+        let mut args: Vec<f32> = Vec::new();
+        for a in args_s.split(',') {
+            let t = a.trim();
+            let v = if t.ends_with("deg") {
+                t.trim_end_matches("deg").parse::<f32>().unwrap_or(0.0)
+            } else if t.ends_with("rad") {
+                t.trim_end_matches("rad").parse::<f32>().unwrap_or(0.0).to_degrees()
+            } else if t.ends_with("px") {
+                t.trim_end_matches("px").parse::<f32>().unwrap_or(0.0)
+            } else if t.ends_with('%') {
+                let pct = t.trim_end_matches('%').parse::<f32>().unwrap_or(0.0);
+                0.0 // 百分比在函数内按需展开，此处占位
+            } else {
+                t.parse::<f32>().unwrap_or(0.0)
+            };
+            args.push(v);
+        }
+        let one = match name.as_str() {
+            "scale" => {
+                let sx = args.first().copied().unwrap_or(1.0);
+                let sy = args.get(1).copied().unwrap_or(sx);
+                Transform::from_scale(sx, sy)
+            }
+            "scalex" => Transform::from_scale(args.first().copied().unwrap_or(1.0), 1.0),
+            "scaley" => Transform::from_scale(1.0, args.first().copied().unwrap_or(1.0)),
+            "rotate" => Transform::from_angle(args.first().copied().unwrap_or(0.0).to_radians()),
+            "translate" => {
+                let tx = args.first().copied().unwrap_or(0.0);
+                let ty = args.get(1).copied().unwrap_or(0.0);
+                Transform::from_translate(tx, ty)
+            }
+            "translatex" => Transform::from_translate(args.first().copied().unwrap_or(0.0), 0.0),
+            "translatey" => Transform::from_translate(0.0, args.first().copied().unwrap_or(0.0)),
+            "matrix" => {
+                let g = |i: usize| args.get(i).copied().unwrap_or(0.0);
+                Transform {
+                    sx: g(0),
+                    kx: g(2),
+                    ky: g(1),
+                    sy: g(3),
+                    tx: g(4),
+                    ty: g(5),
+                }
+            }
+            "skew" | "skewx" | "skewy" => {
+                let ang = args.first().copied().unwrap_or(0.0).to_radians();
+                if name == "skewy" {
+                    Transform { sx: 1.0, kx: 0.0, ky: ang.tan(), sy: 1.0, tx: 0.0, ty: 0.0 }
+                } else if name == "skewx" {
+                    Transform { sx: 1.0, kx: ang.tan(), ky: 0.0, sy: 1.0, tx: 0.0, ty: 0.0 }
+                } else {
+                    Transform { sx: 1.0, kx: ang.tan(), ky: 0.0, sy: 1.0, tx: 0.0, ty: 0.0 }
+                }
+            }
+            _ => continue,
+        };
+        // 从左到右：m = m * one（CSS 语义：右边的先作用于点）
+        m = m.post_concat(one);
+        found = true;
+    }
+    found.then_some(m)
+}
+
+/// transform-origin 声明 → (ox, oy) 像素
+fn parse_origin(decl: Option<&String>, w: f32, h: f32) -> (f32, f32) {
+    let Some(d) = decl else { return (w / 2.0, h / 2.0) };
+    let parts: Vec<&str> = d.split_whitespace().collect();
+    let px = |t: &str, base: f32| -> f32 {
+        if let Some(p) = t.strip_suffix('%') {
+            base * p.parse::<f32>().unwrap_or(50.0) / 100.0
+        } else if t == "center" {
+            base / 2.0
+        } else if t == "left" || t == "top" {
+            0.0
+        } else if t == "right" || t == "bottom" {
+            base
+        } else {
+            t.trim_end_matches("px").parse::<f32>().unwrap_or(base / 2.0)
+        }
+    };
+    match parts.len() {
+        0 => (w / 2.0, h / 2.0),
+        1 => (px(parts[0], w), h / 2.0),
+        _ => (px(parts[0], w), px(parts[1], h)),
+    }
+}
+
 fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEngine) {
     if n.w <= 0.0 || n.h <= 0.0 {
         return;
@@ -218,6 +320,17 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
     if let Some(bs) = n.decls.get("box-shadow") {
         draw_box_shadows(pixmap, n, bs, radius);
     }
+
+    // transform：路径类绘制（背景/边框）套变换；transform-origin 以节点中心偏移
+    let transform = n.decls.get("transform").and_then(|t| parse_transform(t, n.w, n.h));
+    let tx = transform.map(|m| {
+        let (ox, oy) = parse_origin(n.decls.get("transform-origin"), n.w, n.h);
+        Transform::from_translate(n.x + ox, n.y + oy)
+            .post_concat(m)
+            .post_concat(Transform::from_translate(-(n.x + ox), -(n.y + oy)))
+    });
+    let ident = Transform::identity();
+    let draw_tx = tx.as_ref().unwrap_or(&ident);
 
     // 背景图（Lightning CSS 已把 background 简写展开为 background-image 等长属性）
     if n.tag != "img" {
@@ -249,7 +362,7 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
                 let mut p = Paint::default();
                 p.set_color_rgba8(c[0], c[1], c[2], (c[3] as f32 * opacity) as u8);
                 p.anti_alias = true;
-                pixmap.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
+                pixmap.fill_path(&path, &p, FillRule::Winding, *draw_tx, None);
             }
             Some(Bg::Linear { deg, stops }) => {
                 if let Some(shader) = linear_shader(deg, &stops, n.w, n.h) {
@@ -257,7 +370,7 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
                     let mut p = Paint::default();
                     p.shader = shader;
                     p.anti_alias = true;
-                    pixmap.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
+                    pixmap.fill_path(&path, &p, FillRule::Winding, *draw_tx, None);
                 }
             }
             Some(Bg::Radial { stops }) => {
@@ -276,7 +389,7 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
                         let mut p = Paint::default();
                         p.shader = g;
                         p.anti_alias = true;
-                        pixmap.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
+                        pixmap.fill_path(&path, &p, FillRule::Winding, *draw_tx, None);
                     }
                 }
             }
@@ -314,7 +427,7 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
         p.set_color_rgba8(bc[0], bc[1], bc[2], (bc[3] as f32 * opacity) as u8);
         p.anti_alias = true;
         let stroke = Stroke { width: bw, ..Stroke::default() };
-        pixmap.stroke_path(&path, &p, &stroke, Transform::identity(), None);
+        pixmap.stroke_path(&path, &p, &stroke, *draw_tx, None);
     }
 
     // 文本（仅叶子画：容器的文本已作为附加叶子单独布局，这里再画会重复）
@@ -377,7 +490,7 @@ fn draw_box_shadows(pixmap: &mut Pixmap, n: &PaintNode, decl: &str, radius: f32)
                 );
                 p.set_color_rgba8(c[0], c[1], c[2], (c[3] as f32 * a) as u8);
                 let stroke = Stroke { width: bw / 2.0, ..Stroke::default() };
-                pixmap.stroke_path(&path, &p, &stroke, Transform::identity(), None);
+                pixmap.stroke_path(&path, &p, &stroke, *draw_tx, None);
             }
         } else {
             // 外阴影：偏移+扩散矩形，blur 用多层近似
@@ -394,7 +507,7 @@ fn draw_box_shadows(pixmap: &mut Pixmap, n: &PaintNode, decl: &str, radius: f32)
                 );
                 let a = 1.0 - k * 0.6;
                 p.set_color_rgba8(c[0], c[1], c[2], (c[3] as f32 * a * 0.35) as u8);
-                pixmap.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
+                pixmap.fill_path(&path, &p, FillRule::Winding, *draw_tx, None);
             }
         }
     }
