@@ -462,6 +462,27 @@ fn draw_bg_image(pixmap: &mut Pixmap, n: &PaintNode, img: &Pixmap) {
         .get("background-position")
         .map(|p| crate::renderer::media::parse_position(p))
         .unwrap_or((0.0, 0.0));
-    // 精灵取片：背景图按 size 缩放后从 (-ox, -oy) 起，截节点矩形大小
-    blit(pixmap, img, n.x + ox, n.y + oy, dw, dh, (n.x, n.y, n.w, n.h));
+    // repeat 语义：CSS 默认 repeat（未写 no-repeat 时平铺铺满节点）
+    let bg = n.decls.get("background").cloned().unwrap_or_default();
+    let no_repeat = bg.contains("no-repeat")
+        || n.decls
+            .get("background-repeat")
+            .map(|v| v.contains("no-repeat"))
+            .unwrap_or(false);
+    if no_repeat {
+        // 精灵取片：背景图按 size 缩放后偏移 ox,oy，裁到节点矩形
+        blit(pixmap, img, n.x + ox, n.y + oy, dw, dh, (n.x, n.y, n.w, n.h));
+    } else {
+        let mut ty = n.y + oy;
+        while ty < n.y + n.h {
+            let mut tx = n.x + ox;
+            while tx < n.x + n.w {
+                blit(pixmap, img, tx, ty, dw, dh, (n.x, n.y, n.w, n.h));
+                if dw <= 0.0 { break; }
+                tx += dw;
+            }
+            if dh <= 0.0 { break; }
+            ty += dh;
+        }
+    }
 }
