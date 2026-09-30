@@ -268,7 +268,7 @@ fn selector_matches(parts: &[SelectorPart], ancestors: &[NodeKey], cur: &NodeKey
                 if !found {
                     return false;
                 }
-                ri -= 2;
+                ri = ri.saturating_sub(2); // rest 末段无组合子可消耗，防下溢
             }
         }
     }
