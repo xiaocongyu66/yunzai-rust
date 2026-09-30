@@ -249,6 +249,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
             line_height: lh,
             align,
             src: n.src.clone(),
+            family,
         };
 
         // 文本叶子：无子节点但有文本（尺寸由 compute_layout_with_measure 按约束宽度动态换行）
