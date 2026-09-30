@@ -401,22 +401,6 @@ fn draw_box_shadows(pixmap: &mut Pixmap, n: &PaintNode, decl: &str, radius: f32)
 }
 
 
-/// src-over 像素混合（cosmic-text 回调颜色 → tiny-skia 像素）
-fn blend_px(dst: &mut tiny_skia::ColorU8, col: cosmic_text::Color) {
-    let a = col.a() as u32;
-    if a == 0 {
-        return;
-    }
-    let (dr, dg, db, da) = (dst.red() as u32, dst.green() as u32, dst.blue() as u32, dst.alpha() as u32);
-    let out_a = a + da * (255 - a) / 255;
-    if out_a == 0 {
-        dst.set_rgba(0, 0, 0, 0);
-        return;
-    }
-    let mix = |fg: u32, bg: u32| ((fg * a + bg * da * (255 - a) / 255) / out_a) as u8;
-    dst.set_rgba(mix(col.r(), dr), mix(col.g(), dg), mix(col.b(), db), out_a as u8);
-}
-
 fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEngine) {
     // text-shadow（取第一重）：先画一层偏移阴影，再画正文
     if let Some(ts) = n.decls.get("text-shadow").cloned() {
@@ -456,11 +440,31 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
             let bx = sn.x.round() as i32;
             let by = sn.y.round() as i32;
             buffer_s.draw(&mut fonts.font_system, &mut fonts.swash, sc, |gx, gy, gw, gh, col| {
+                let px = bx + gx;
+                let py = by + gy;
                 for yy in 0..gh {
                     for xx in 0..gw {
-                        if let Some(px) = pixmap.pixel_mut((bx + gx + xx) as u32, (by + gy + yy) as u32) {
-                            blend_px(px, col);
+                        let (x, y) = (px + xx as i32, py + yy as i32);
+                        if x < 0 || y < 0 {
+                            continue;
                         }
+                        let (x, y) = (x as u32, y as u32);
+                        if x >= pixmap.width() || y >= pixmap.height() {
+                            continue;
+                        }
+                        let sa = col.a() as u32;
+                        if sa == 0 {
+                            continue;
+                        }
+                        let data = pixmap.data_mut();
+                        let di = ((y * pixmap.width() + x) * 4) as usize;
+                        let da = data[di + 3] as u32;
+                        let out_a = (sa + da * (255 - sa) / 255) as u8;
+                        let mix = |fg: u32, bg: u32| ((fg * sa + bg * da * (255 - sa) / 255) / out_a.max(1) as u32) as u8;
+                        data[di] = mix(col.r() as u32, data[di] as u32);
+                        data[di + 1] = mix(col.g() as u32, data[di + 1] as u32);
+                        data[di + 2] = mix(col.b() as u32, data[di + 2] as u32);
+                        data[di + 3] = out_a;
                     }
                 }
             });
