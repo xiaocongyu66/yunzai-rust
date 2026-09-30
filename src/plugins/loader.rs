@@ -208,13 +208,22 @@ impl PluginsLoader {
         &self,
         engine: &Arc<crate::nodejs::JsEngine>,
         data: &crate::nodejs::JsPluginData,
-        e: &E,
+        e: &mut E,
         fnc: &str,
     ) -> bool {
         crate::nodejs::EventGuard::set(&data.reg_key, e.bot.clone(), e.data.clone());
         engine.instantiate(&data.reg_key, &e.data).await;
         let ret = engine.call(&data.reg_key, fnc, &e.data).await;
         crate::nodejs::EventGuard::clear(&data.reg_key);
+        // call 统一回传 {ret, msg}：插件改写的 e.msg 同步回宿主
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&ret) {
+            if let Some(nm) = v.get("msg").and_then(|x| x.as_str()) {
+                if let Some(obj) = e.data.as_object_mut() {
+                    obj.insert("msg".into(), serde_json::Value::String(nm.to_string()));
+                }
+            }
+            return v.get("ret").and_then(|x| x.as_str()).map(|r| r != "false").unwrap_or(true);
+        }
         ret != "false"
     }
 
@@ -366,7 +375,7 @@ impl PluginsLoader {
                         }
                         AnyPlugin::Js(data) => {
                             if let Some(engine) = engine.clone() {
-                                self.js_call(&engine, data, &e, &rule.fnc).await
+                                self.js_call(&engine, data, &mut e, &rule.fnc).await
                             } else {
                                 false
                             }

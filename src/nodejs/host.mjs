@@ -141,9 +141,25 @@ function contact(e, kind) {
   return base
 }
 
+// 通用事件缓存：同一事件（accept→call 全链）共享同一个 e 对象。
+// 插件对 e 的任何修改（msg/uid/char/自定义字段）天然保留，宿主无需逐插件适配。
+const evCache = new Map() // evId -> e
+function evIdOf(eJson) {
+  const e = typeof eJson === 'string' ? JSON.parse(eJson || '{}') : (eJson ?? {})
+  return `${e.message_id ?? ''}|${e.time ?? ''}|${e.user_id ?? ''}|${e.self_id ?? ''}`
+}
+
 function buildE(key, eJson) {
-  const e = typeof eJson === 'string' ? JSON.parse(eJson || 'null') : eJson
-  if (!e || typeof e !== 'object') return e
+  const raw = typeof eJson === 'string' ? JSON.parse(eJson || 'null') : eJson
+  if (!raw || typeof raw !== 'object') return raw
+  const evId = evIdOf(raw)
+  if (evCache.has(evId)) return evCache.get(evId)
+  const e = raw
+  if (evCache.size > 200) {
+    const first = evCache.keys().next().value
+    evCache.delete(first)
+  }
+  evCache.set(evId, e)
   e.reply = async (msg, quote, data) => op('e_reply', { key, msg: JSON.stringify(msg), quote: !!quote, data: data ? JSON.stringify(data) : '' })
   e.recall = async () => op('recall', { self_id: e.self_id, message_id: e.message_id, group_id: e.group_id ?? null, user_id: e.user_id ?? null })
   e.setContext = (type, isGroup, time = 120, timeout = '操作超时已取消') =>
@@ -349,7 +365,8 @@ async function callMethod(regKey, fnc, eJson) {
     inst.e = e
     const ret = await inst[fnc](e)
     if (ret === false) return 'false'
-    return String(ret ?? '')
+    // 统一回传：e.msg 可能被插件改写，同步回宿主（规则匹配/后续插件用新值）
+    return JSON.stringify({ ret: String(ret ?? ''), msg: typeof e.msg === 'string' ? e.msg : null })
   } catch (err) {
     log(3, `${regKey}.${fnc} 异常: ${err?.stack ?? err}`)
     return 'null'
@@ -365,7 +382,7 @@ async function accept(regKey, eJson) {
     inst.e = e
     if (typeof inst.accept !== 'function') return 'null'
     const ret = await inst.accept(e) ?? 'null'
-    // TRSS 语义：check/accept 可改写 e.msg（如 #刻晴 → #喵喵角色卡片），回传给宿主更新
+    // 统一回传：accept 可改写 e.msg（如 #刻晴 → #喵喵角色卡片）
     return JSON.stringify({ ret: String(ret ?? 'null'), msg: typeof e.msg === 'string' ? e.msg : null })
   } catch (err) {
     log(3, `${regKey}.accept 异常: ${err?.stack ?? err}`)
