@@ -25,8 +25,9 @@ pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> R
     let width = width.clamp(64, 4096) as f32;
 
     // 1. 解析 DOM + 收集样式（<style> 块 + inline style + 选择器匹配）
-    let (root_node, rules, font_faces) = dom::parse_with_base(html, base_dir)?;
-    let styled = css::apply_styles(root_node, &rules);
+    let (root_node, css_rules, font_faces, pseudo_rules) = dom::parse_with_base(html, base_dir)?;
+    let mut styled = css::apply_styles(root_node, &css_rules);
+    css::apply_pseudo(&mut styled, &pseudo_rules);
 
     // 2. 字体系统（先加载插件字体，再注册 @font-face 别名）
     let mut fonts = text::TextEngine::load(font_dirs)?;

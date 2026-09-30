@@ -11,34 +11,75 @@ pub fn parse_stylesheet(css: &str) -> Vec<CssRule> {
     parse_stylesheet_lc(css).0
 }
 
-/// 返回 (样式规则, @font-face 列表 [(family, url)])
-pub fn parse_stylesheet_lc(css: &str) -> (Vec<CssRule>, Vec<(String, String)>) {
+/// 伪元素规则（::before / ::after）
+#[derive(Clone, Debug)]
+pub struct PseudoRule {
+    pub parent: Vec<SelectorPart>,
+    pub which: &'static str,
+    pub decls: BTreeMap<String, String>,
+}
+
+/// 拆分选择器尾部的伪元素，返回 (主体, Some(伪元素名)) 或 (原样, None)
+fn split_pseudo(sel: &str) -> (String, Option<&'static str>) {
+    let s = sel.trim();
+    for (lit, which) in [
+        ("::before", "before"),
+        ("::after", "after"),
+        (":before", "before"),
+        (":after", "after"),
+    ] {
+        if let Some(rest) = s.strip_suffix(lit) {
+            let rest = rest.trim();
+            if !rest.is_empty() {
+                return (rest.to_string(), Some(which));
+            }
+        }
+    }
+    (s.to_string(), None)
+}
+
+/// 返回 (样式规则, @font-face 列表, 伪元素规则列表)
+pub fn parse_stylesheet_lc(css: &str) -> (Vec<CssRule>, Vec<(String, String)>, Vec<PseudoRule>) {
     use lightningcss::rules::font_face::{FontFaceProperty, Source};
     use lightningcss::rules::CssRule as LcRule;
     use lightningcss::traits::ToCss;
     let mut out = Vec::new();
     let mut faces: Vec<(String, String)> = Vec::new();
+    let mut pseudos: Vec<PseudoRule> = Vec::new();
     let Ok(ss) = lightningcss::stylesheet::StyleSheet::parse(css, lightningcss::stylesheet::ParserOptions::default()) else {
-        return (out, faces);
+        return (out, faces, pseudos);
     };
     for rule in ss.rules.0.iter() {
         match rule {
             LcRule::Style(st) => {
-                let Ok(sel) = st.selectors.to_css_string(lc_opts()) else { continue };
-                // 伪类/伪元素暂不支持，跳过该规则
-                if sel.contains(':') {
-                    continue;
-                }
                 let mut decls: Vec<(String, String)> = Vec::new();
                 for d in st.declarations.declarations.iter() {
                     serialize_decl(d, &mut decls);
                 }
-                for one in sel.split(',') {
+                let sel_str = st.selectors.to_css_string(lc_opts()).unwrap_or_default();
+                for one in sel_str.split(',') {
                     let one = one.trim();
                     if one.is_empty() {
                         continue;
                     }
-                    let (parts, spec) = compile_selector(one);
+                    let (body, which) = split_pseudo(one);
+                    // 伪类（:hover/:nth-child 等）暂不支持，跳过
+                    if which.is_none() && body.contains(':') {
+                        continue;
+                    }
+                    if let Some(w) = which {
+                        let (parts, _) = compile_selector(&body);
+                        pseudos.push(PseudoRule {
+                            parent: parts,
+                            which: match w {
+                                "before" => "before",
+                                _ => "after",
+                            },
+                            decls: decls.iter().cloned().collect(),
+                        });
+                        continue;
+                    }
+                    let (parts, spec) = compile_selector(&body);
                     out.push(CssRule { selector: parts, decls: decls.iter().cloned().collect(), specificity: spec });
                 }
             }
@@ -49,7 +90,6 @@ pub fn parse_stylesheet_lc(css: &str) -> (Vec<CssRule>, Vec<(String, String)>) {
                     match prop {
                         FontFaceProperty::FontFamily(f) => {
                             if let lightningcss::properties::font::FontFamily::FamilyName(n) = f {
-                                use lightningcss::traits::ToCss as _;
                                 if let Ok(v) = n.to_css_string(lc_opts()) {
                                     fam = v.trim_matches(|c| c == '"' || c == '\'').to_string();
                                 }
@@ -72,7 +112,53 @@ pub fn parse_stylesheet_lc(css: &str) -> (Vec<CssRule>, Vec<(String, String)>) {
             _ => {}
         }
     }
-    (out, faces)
+    (out, faces, pseudos)
+}
+
+/// 应用伪元素规则：命中 parent 选择器的节点，注入 ::before/::after 虚拟子节点
+pub fn apply_pseudo(root: &mut StyleNode, rules: &[PseudoRule]) {
+    if rules.is_empty() {
+        return;
+    }
+    apply_pseudo_rec(root, rules, &[]);
+}
+
+fn apply_pseudo_rec(node: &mut StyleNode, rules: &[PseudoRule], ancestors: &[NodeKey]) {
+    let key = key_of(node);
+    // 当前节点作为"父"匹配：selector_matches 最后一格匹配 cur
+    let mut be: Option<PseudoRule> = None;
+    let mut af: Option<PseudoRule> = None;
+    for r in rules {
+        if selector_matches(&r.parent, ancestors, &key) {
+            match r.which {
+                "before" => be = Some(r.clone()),
+                _ => af = Some(r.clone()),
+            }
+        }
+    }
+    if let Some(r) = be {
+        let content = r.decls.get("content").cloned().unwrap_or_default();
+        let content = content.trim_matches(|c| c == '"' || c == '\'').to_string();
+        let mut child = StyleNode::new("::before".to_string());
+        child.decls = r.decls.clone();
+        child.decls.remove("content");
+        child.text = content;
+        node.children.insert(0, child);
+    }
+    if let Some(r) = af {
+        let content = r.decls.get("content").cloned().unwrap_or_default();
+        let content = content.trim_matches(|c| c == '"' || c == '\'').to_string();
+        let mut child = StyleNode::new("::after".to_string());
+        child.decls = r.decls.clone();
+        child.decls.remove("content");
+        child.text = content;
+        node.children.push(child);
+    }
+    let mut child_anc: Vec<NodeKey> = ancestors.to_vec();
+    child_anc.push(key);
+    for c in node.children.iter_mut() {
+        apply_pseudo_rec(c, rules, &child_anc);
+    }
 }
 
 /// `div.card > .name span` → [Tag(div), Class(card), Child, Class(name), Descendant, Tag(span)]
