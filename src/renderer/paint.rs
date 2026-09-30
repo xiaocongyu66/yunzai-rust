@@ -199,6 +199,28 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
         .and_then(|v| split_commas(v).first().and_then(|r| r.trim().trim_end_matches("px").parse::<f32>().ok()))
         .unwrap_or(0.0);
 
+    // 背景图（Lightning CSS 已把 background 简写展开为 background-image 等长属性）
+    if n.tag != "img" {
+        if let Some(bi) = n.decls.get("background-image") {
+            if let Some(url) = crate::renderer::media::extract_url(bi) {
+                let base = crate::renderer::BASE_DIR.get().map(String::as_str).unwrap_or(".");
+                let abs = crate::renderer::media::resolve(&url, base);
+                if let Some(img) = crate::renderer::media::load(&abs, base) {
+                    draw_bg_image(pixmap, n, &img);
+                }
+            }
+        }
+    }
+
+    // <img> 标签：按节点矩形绘制 src 图
+    if n.tag == "img" {
+        if let Some(src) = &n.src {
+            if let Some(img) = crate::renderer::media::load(src, crate::renderer::BASE_DIR.get().map(String::as_str).unwrap_or(".")) {
+                blit(pixmap, &img, n.x, n.y, n.w, n.h, (n.x, n.y, n.w, n.h));
+            }
+        }
+    }
+
     // 背景
     if let Some(bg) = n.decls.get("background").or_else(|| n.decls.get("background-color")).cloned() {
         match parse_bg(&bg) {
