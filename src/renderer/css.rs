@@ -167,26 +167,23 @@ fn parse_declarations_lc(s: &str) -> Option<Vec<(String, String)>> {
     };
     let mut out = Vec::new();
     for decl in style.declarations.declarations.iter() {
-        let pid = decl.property_id();
-        let name = pid.name().to_string();
-        match &decl.property {
+        let name = decl.property_id().name().to_string();
+        match decl {
             Property::Padding(r) => {
-                out.push(("padding-top".into(), lc_val(&r.0)));
-                out.push(("padding-right".into(), lc_val(&r.1)));
-                out.push(("padding-bottom".into(), lc_val(&r.2)));
-                out.push(("padding-left".into(), lc_val(&r.3)));
+                out.push(("padding-top".into(), lc_val(&r.top)));
+                out.push(("padding-right".into(), lc_val(&r.right)));
+                out.push(("padding-bottom".into(), lc_val(&r.bottom)));
+                out.push(("padding-left".into(), lc_val(&r.left)));
             }
             Property::Margin(r) => {
-                out.push(("margin-top".into(), lc_val(&r.0)));
-                out.push(("margin-right".into(), lc_val(&r.1)));
-                out.push(("margin-bottom".into(), lc_val(&r.2)));
-                out.push(("margin-left".into(), lc_val(&r.3)));
+                out.push(("margin-top".into(), lc_val(&r.top)));
+                out.push(("margin-right".into(), lc_val(&r.right)));
+                out.push(("margin-bottom".into(), lc_val(&r.bottom)));
+                out.push(("margin-left".into(), lc_val(&r.left)));
             }
             Property::Background(list) => {
                 for b in list {
-                    if let Some(img) = &b.image {
-                        out.push(("background-image".into(), lc_val(img)));
-                    }
+                    out.push(("background-image".into(), lc_val(&b.image)));
                     out.push(("background-color".into(), lc_val(&b.color)));
                     out.push(("background-position".into(), lc_val(&b.position)));
                     out.push(("background-size".into(), lc_val(&b.size)));
@@ -196,9 +193,6 @@ fn parse_declarations_lc(s: &str) -> Option<Vec<(String, String)>> {
             Property::Gap(g) => {
                 out.push(("row-gap".into(), lc_val(&g.row)));
                 out.push(("column-gap".into(), lc_val(&g.column)));
-            }
-            Property::BorderRadius(r) => {
-                out.push(("border-radius".into(), lc_val_radius(r)));
             }
             other => {
                 // 通用：属性名 + 序列化值
@@ -216,16 +210,6 @@ fn lc_val<T: lightningcss::traits::ToCss>(v: &T) -> String {
     v.to_css_string().unwrap_or_default()
 }
 
-fn lc_val_radius(r: &lightningcss::properties::border_radius::BorderRadius) -> String {
-    let h = &r.radius;
-    format!(
-        "{} {} {} {}",
-        lc_val(&h.top_left),
-        lc_val(&h.top_right),
-        lc_val(&h.bottom_right),
-        lc_val(&h.bottom_left)
-    )
-}
 
 /// 括号感知的顶层分割（linear-gradient(a,b) 内的 ; 逗号不切）
 fn split_top(s: &str, sep: char) -> Vec<String> {
