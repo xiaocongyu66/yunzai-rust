@@ -13,8 +13,9 @@ pub fn parse_stylesheet(css: &str) -> Vec<CssRule> {
 
 /// 返回 (样式规则, @font-face 列表 [(family, url)])
 pub fn parse_stylesheet_lc(css: &str) -> (Vec<CssRule>, Vec<(String, String)>) {
-    use lightningcss::properties::font::{FontFamily, Source};
-    use lightningcss::rules::{CssRule, FontFaceProperty};
+    use lightningcss::rules::font_face::{FontFaceProperty, Source};
+    use lightningcss::rules::CssRule as LcRule;
+    use lightningcss::traits::ToCss;
     let mut out = Vec::new();
     let mut faces: Vec<(String, String)> = Vec::new();
     let Ok(ss) = lightningcss::stylesheet::StyleSheet::parse(css, lightningcss::stylesheet::ParserOptions::default()) else {
@@ -22,39 +23,39 @@ pub fn parse_stylesheet_lc(css: &str) -> (Vec<CssRule>, Vec<(String, String)>) {
     };
     for rule in ss.rules.0.iter() {
         match rule {
-            CssRule::Style(st) => {
+            LcRule::Style(st) => {
                 let Ok(sel) = st.selectors.to_css_string(lc_opts()) else { continue };
                 // 伪类/伪元素暂不支持，跳过该规则
                 if sel.contains(':') {
                     continue;
                 }
-                let mut decls: BTreeMap<String, String> = BTreeMap::new();
+                let mut decls: Vec<(String, String)> = Vec::new();
                 for d in st.declarations.declarations.iter() {
                     serialize_decl(d, &mut decls);
                 }
-                let decls_vec: Vec<(String, String)> = decls.into_iter().collect();
                 for one in sel.split(',') {
                     let one = one.trim();
                     if one.is_empty() {
                         continue;
                     }
                     let (parts, spec) = compile_selector(one);
-                    out.push(CssRule { selector: parts, decls: decls_vec.iter().cloned().collect(), specificity: spec });
+                    out.push(CssRule { selector: parts, decls: decls.iter().cloned().collect(), specificity: spec });
                 }
             }
-            CssRule::FontFace(ff) => {
+            LcRule::FontFace(ff) => {
                 let mut fam = String::new();
                 let mut src = String::new();
                 for prop in ff.properties.iter() {
                     match prop {
-                        FontFaceProperty::FontFamily(f) => match f {
-                            FontFamily::FamilyName(n) => fam = n.name.clone(),
-                            FontFamily::Generic(_) => {}
-                        },
+                        FontFaceProperty::FontFamily(f) => {
+                            if let lightningcss::properties::font::FontFamily::FamilyName(n) = f {
+                                fam = n.0.to_string();
+                            }
+                        }
                         FontFaceProperty::Source(list) => {
                             for sv in list {
                                 if let Source::Url(u) = sv {
-                                    src = u.url.clone();
+                                    src = u.url.url.to_string();
                                 }
                             }
                         }

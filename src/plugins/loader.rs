@@ -432,7 +432,7 @@ impl PluginsLoader {
                     AnyPlugin::Native(native) => native.handle(&mut pe, &fnc).await,
                     AnyPlugin::Js(data) => {
                         if let Some(engine) = engine.clone() {
-                            self.js_call(&engine, data, e, &fnc).await
+                            self.js_call(&engine, data, &mut *e, &fnc).await
                         } else {
                             false
                         }

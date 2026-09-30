@@ -44,7 +44,7 @@ pub enum SelectorPart {
     Child,
 }
 
-pub fn parse(html: &str) -> Result<(StyleNode, Vec<CssRule>), String> {
+pub fn parse(html: &str) -> Result<(StyleNode, Vec<CssRule>, Vec<(String, String)>), String> {
     parse_with_base(html, ".")
 }
 
