@@ -171,31 +171,36 @@ function buildE(key, eJson) {
         Object.assign(data, extra ?? {})
       }
       const html = art(file, data)
-      // ≈ TRSS puppeteer viewport 基准 1280：width = 1280 * scale（scale=3 即 4K）
-      const r = await op('render', { html, width: opts.scale ? Math.round(1280 * opts.scale) : 1280 })
-      const b64 = r?.data ?? null
-      if (!b64) {
+      // Rust 侧直接落盘返回路径（大 base64 过 bridge 曾被污染）
+      // baseDir：HTML 相对资源（img/background url）的基准 = 模板目录；fontDirs：插件自带字体
+      const path = await import('node:path')
+      const r = await op('render', {
+        html,
+        width: opts.scale ? Math.round(1280 * opts.scale) : 1280,
+        baseDir: path.dirname(file),
+        fontDirs: [`${process.cwd()}/plugins/${plugin}/resources/common/font`],
+      })
+      const img = r?.file ?? null
+      if (!img) {
         log(3, `[render] 渲染失败: ${r?.error ?? '无输出'}`)
         return null
       }
-      // ≈ TRSS puppeteer 语义：retType 'base64' 返回 base64；
-      //   'default'/'msgId' 直接 reply 图片并返回 msgId
-      if (opts.retType === 'base64') return b64
-      // NTQQ 对大 base64 WS 直传会超时 → 落盘真图片，用 file:// 路径发
-      const dir = `${process.cwd()}/data/render`
-      fs.mkdirSync(dir, { recursive: true })
-      const img = `${dir}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`
-      fs.writeFileSync(img, Buffer.from(b64, 'base64'))
-      log(2, `[render] 渲染成功 ${(b64.length / 1024) | 0}kb → ${img}`)
+      log(2, `[render] 渲染成功 ${((r.size ?? 0) / 1024) | 0}kb → ${img}`)
+      if (opts.retType === 'base64') {
+        return fs.readFileSync(img).toString('base64')
+      }
       const mid = await e.reply({ type: 'image', file: `file://${img}` })
       log(2, `[render] reply 完成: ${mid}`)
-      // 延迟 5 分钟清理本图（留时间排查图有效性）；render/ 中超过 1 小时的残留也清掉
+      // 延迟 5 分钟清理本图；render/ 中超过 1 小时的残留也清掉
       try {
         setTimeout(() => { try { fs.rmSync(img, { force: true }) } catch {} }, 300_000)
         const now = Date.now()
-        for (const f of fs.readdirSync(dir)) {
-          const p = `${dir}/${f}`
-          if (now - fs.statSync(p).mtimeMs > 3600_000) fs.rmSync(p, { force: true })
+        const dir = `${process.cwd()}/data/render`
+        if (fs.existsSync(dir)) {
+          for (const f of fs.readdirSync(dir)) {
+            const p = `${dir}/${f}`
+            if (now - fs.statSync(p).mtimeMs > 3600_000) fs.rmSync(p, { force: true })
+          }
         }
       } catch {}
       return mid ?? true
