@@ -30,6 +30,17 @@ pub static START_TYPE: Lazy<String> = Lazy::new(|| {
 });
 
 fn main() {
+    // CWD 自愈：config/ 必须可达（后台 shell 的 cwd 漂移会让相对路径全炸）
+    if !std::path::Path::new("config/default_config").exists() {
+        if let Ok(exe) = std::env::current_exe() {
+            // 约定：bin/<binary> → 项目根为 exe 父目录的父级
+            if let Some(root) = exe.parent().and_then(|p| p.parent()) {
+                if root.join("config/default_config").exists() {
+                    let _ = std::env::set_current_dir(root);
+                }
+            }
+        }
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mode = args.first().map(String::as_str).unwrap_or("");
 
