@@ -199,12 +199,12 @@ pub fn resolve(n: &StyleNode, width: f32) -> Resolved {
 fn apply(p: &Property, basis: f32, r: &mut Resolved) {
     use lightningcss::properties::Property as P;
     match p {
-        P::Width(v) => r.width = tdim(&v.0, basis),
-        P::Height(v) => r.height = tdim(&v.0, basis),
-        P::MinWidth(v) => r.min_width = tdim(&v.0, basis),
-        P::MinHeight(v) => r.min_height = tdim(&v.0, basis),
-        P::MaxWidth(v) => r.max_width = tdim(&v.0, basis),
-        P::MaxHeight(v) => r.max_height = tdim(&v.0, basis),
+        P::Width(v) => r.width = size_dim(v, basis),
+        P::Height(v) => r.height = size_dim(v, basis),
+        P::MinWidth(v) => r.min_width = size_dim(v, basis),
+        P::MinHeight(v) => r.min_height = size_dim(v, basis),
+        P::MaxWidth(v) => r.max_width = maxsize_dim(v, basis),
+        P::MaxHeight(v) => r.max_height = maxsize_dim(v, basis),
         P::Margin(m) => {
             r.margin.top = tlpa(&m.top, basis);
             r.margin.right = tlpa(&m.right, basis);
@@ -317,6 +317,25 @@ fn apply(p: &Property, basis: f32, r: &mut Resolved) {
 }
 
 
+
+/// lightningcss Size（Auto | LengthPercentage | 关键字）→ taffy Dimension
+fn size_dim(v: &lightningcss::properties::size::Size, basis: f32) -> Dimension {
+    use lightningcss::properties::size::Size as LS;
+    match v {
+        LS::Auto => Dimension::Auto,
+        LS::LengthPercentage(lp) => tdim(lp, basis),
+        _ => Dimension::Auto,
+    }
+}
+
+fn maxsize_dim(v: &lightningcss::properties::size::MaxSize, basis: f32) -> Dimension {
+    use lightningcss::properties::size::MaxSize as LM;
+    match v {
+        LM::None => Dimension::Auto,
+        LM::LengthPercentage(lp) => tdim(lp, basis),
+        _ => Dimension::Auto,
+    }
+}
 fn gap_val(v: &lightningcss::properties::align::GapValue, basis: f32) -> LengthPercentage {
     use lightningcss::properties::align::GapValue as GV;
     match v {
