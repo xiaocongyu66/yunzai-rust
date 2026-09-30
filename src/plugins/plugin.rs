@@ -205,6 +205,7 @@ impl E {
     }
 
     pub async fn reply_with(&self, msg: Value, quote: bool, opts: Value) -> Result<Value, String> {
+        util::make_log1(Level::Debug, Some("reply"), format!("reply_with: len={}", util::string(&msg).len()));
         if msg.is_null() || msg == json!("") {
             return Ok(json!(false));
         }
@@ -223,7 +224,10 @@ impl E {
             msg = Value::Array(vec![crate::segment::reply(message_id.clone()), msg]);
         }
         let res = match self.underlying_reply(msg.clone()).await {
-            Ok(r) => r,
+            Ok(r) => {
+                util::make_log1(Level::Debug, Some("reply"), format!("underlying ok: {}", util::string(&r)));
+                r
+            }
             Err(err) => {
                 let err_msg = err.clone();
                 util::make_log(
