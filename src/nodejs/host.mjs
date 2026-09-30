@@ -24,6 +24,10 @@ if (bridgePath.startsWith('/dev/fd/') || bridgePath.startsWith('/proc/self/fd/')
   bridge = require(bridgePath)
 }
 
+// 插件异步异常兜底：未捕获 rejection/异常只记日志，不杀引擎进程
+process.on('unhandledRejection', (err) => log(3, `unhandledRejection: ${err?.stack ?? err}`))
+process.on('uncaughtException', (err) => log(3, `uncaughtException: ${err?.stack ?? err}`))
+
 // ============ process.exit 拦截（插件不得杀整进程） ============
 const _reallyExit = process.reallyExit?.bind(process)
 const _exit = process.exit.bind(process)
@@ -81,7 +85,8 @@ globalThis.segment = makeSegment()
 
 // ============ redis（node-redis v4 子集，走 op） ============
 globalThis.redis = {
-  get: async (key) => op('redis_get', { key }),
+  // op 失败按"缓存未命中"返回 null：插件（如锅巴）在 try 外调用，抛异常会杀进程
+  get: async (key) => { try { return await op('redis_get', { key }) } catch { return null } },
   set: async (key, val, opts) => op('redis_set', { key, val, ex: opts?.EX ?? (typeof opts === 'number' ? opts : undefined) }),
   setEx: async (key, secs, val) => op('redis_set', { key, val, ex: secs }),
   del: async (...keys) => { for (const k of keys) await op('redis_del', { key: k }); return null },
