@@ -34,34 +34,84 @@ fn node_cfg(cfg: Option<&crate::config::Cfg>) -> (bool, u32, u64) {
 pub const EMBED_BRIDGE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/yz_bridge.node"));
 
 
-/// memfd 内存直载内嵌桥 → 返回 /dev/fd/<n> 路径（不落盘；fd 随进程生命周期）
+/// 内嵌桥三级内存加载（照搬 ccb embedded-stage 实证策略，按"尽可能不落盘"排序）：
 ///
-/// 实证（ccb bun 1.4.2，2026-09）：dlopen 内存加载只有 /dev/fd/<n> 路径可用
-/// （/proc/self/fd/<n> → "file too short"；Buffer 形式 → ERR_DLOPEN_FAILED）。
-/// memfd 必须先 ftruncate 定长（初始 size=0）。fd 不 close：dlopen 以路径
-/// 字符串为缓存键，close 后 fd 复用会撞缓存（按模块常驻，进程内仅 1 个）。
+/// 1. memfd_create → /dev/fd/<fd>——内核匿名内存，零文件对象。仅正常 Linux
+///    可用；dlopen 内存加载只有 /dev/fd 路径可用（/proc/self/fd → "file too
+///    short"，Buffer 形式 → ERR_DLOPEN_FAILED，bun 1.4.2 实测）。memfd 须先
+///    ftruncate 定长（初始 size=0）；fd 不 close（dlopen 以路径字符串为缓存
+///    键，close 后 fd 复用会撞缓存）。
+/// 2. /dev/shm tmpfs——介质是 RAM，磁盘零写入；proot 可用。固定文件名 +
+///    启动覆盖写（tmpfs 重启即清，天然免清理）。
+/// 3. std::env::temp_dir() 兜底——多数设备上它本身也是 tmpfs。
+///
+/// 每级产出都过一次 dlopen(RTLD_LAZY) 试探，失败即降级下一级；全失败再回
+/// 退发行包 lib/ 文件（find_bundled_bridge）。
 #[cfg(unix)]
-fn load_embedded_bridge_in_memory() -> anyhow::Result<PathBuf> {
-    use std::io::Write;
-    use std::os::fd::FromRawFd;
-    extern "C" {
-        fn memfd_create(name: *const u8, flags: u32) -> i32;
-        fn ftruncate(fd: i32, length: i64) -> i32;
+fn load_embedded_bridge() -> anyhow::Result<PathBuf> {
+    use libloading::os::unix::{Library as UnixLib, RTLD_LAZY};
+
+    // dlopen 试探：成功即保留该句柄（leak 成进程级持久引用，embed.rs 再次
+    // open 同路径得到同一镜像）
+    fn probe(path: &Path) -> bool {
+        match unsafe { UnixLib::open(Some(path), RTLD_LAZY) } {
+            Ok(lib) => {
+                std::mem::forget(lib);
+                true
+            }
+            Err(_) => false,
+        }
     }
-    // MFD_CLOEXEC = 0x0001；名字仅用于 /proc 展示
-    let fd = unsafe { memfd_create(b"yz_bridge.node\0".as_ptr(), 0x0001) };
-    if fd < 0 {
-        anyhow::bail!("memfd_create 失败（内核 <3.17？）");
+
+    // 1. memfd → /dev/fd/<fd>
+    if let Some(p) = (|| -> Option<PathBuf> {
+        use std::io::Write;
+        use std::os::fd::FromRawFd;
+        extern "C" {
+            fn memfd_create(name: *const u8, flags: u32) -> i32;
+            fn ftruncate(fd: i32, length: i64) -> i32;
+        }
+        let fd = unsafe { memfd_create(b"yz_bridge.node\0".as_ptr(), 0x0001) };
+        if fd < 3 {
+            return None;
+        }
+        let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+        file.write_all(EMBED_BRIDGE).ok()?;
+        file.flush().ok()?;
+        if unsafe { ftruncate(fd, EMBED_BRIDGE.len() as i64) } != 0 {
+            return None;
+        }
+        std::mem::forget(file); // fd 保活（node require 与 dlopen 都要读它）
+        let p = PathBuf::from(format!("/dev/fd/{fd}"));
+        if probe(&p) {
+            Some(p)
+        } else {
+            None
+        }
+    })() {
+        return Ok(p);
     }
-    let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
-    file.write_all(EMBED_BRIDGE)?;
-    file.flush()?;
-    // memfd 初始 size=0，dlopen 前定长
-    if unsafe { ftruncate(fd, EMBED_BRIDGE.len() as i64) } != 0 {
-        anyhow::bail!("ftruncate 失败");
+    crate::util::make_log1(crate::logger::Level::Info, Some("Node"), "memfd 不可用（proot/老内核？）→ tmpfs 降级");
+
+    // 2./3. tmpfs / tmpdir（写固定名文件，覆盖式）
+    let mut bases: Vec<PathBuf> = vec!["/dev/shm".into()];
+    bases.push(std::env::temp_dir());
+    for base in bases {
+        let p = base.join("yz_bridge.node");
+        if std::fs::write(&p, EMBED_BRIDGE).is_ok() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o700));
+            }
+            if probe(&p) {
+                crate::util::make_log1(crate::logger::Level::Info, Some("Node"), format!("内嵌桥经 tmpfs 加载: {}", p.display()));
+                return Ok(p);
+            }
+            let _ = std::fs::remove_file(&p);
+        }
     }
-    std::mem::forget(file); // fd 保活至进程退出（node require 与 dlopen 都要读它）
-    Ok(PathBuf::from(format!("/dev/fd/{fd}")))
+    anyhow::bail!("内嵌桥内存加载三级全失败（memfd//dev/shm/tmpdir）")
 }
 
 pub struct JsEngine;
@@ -78,7 +128,7 @@ impl JsEngine {
         let bridge_path = if !EMBED_BRIDGE.is_empty() {
             #[cfg(unix)]
             {
-                load_embedded_bridge_in_memory()?
+                load_embedded_bridge()?
             }
             #[cfg(not(unix))]
             {
