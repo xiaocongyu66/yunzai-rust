@@ -1,18 +1,21 @@
 //! 全量 CSS → taffy Style 映射
 //!
 //! 值解析统一走 Lightning CSS 的 Property::parse_string（结构化），
-//! 不再逐属性手写 parser。属性名到 PropertyId 用白名单（alpha.72 的
-//! from_name_and_prefix 为私有 API）。
+//! 属性名→PropertyId 用白名单（alpha.72 的 from_name_and_prefix 为私有 API）。
+//! calc() 经序列化后用 parse_calc_pct_px 按 basis 折算。
 
 use super::dom::StyleNode;
+use super::layout::parse_calc_pct_px;
 use lightningcss::properties::Property;
 use lightningcss::stylesheet::ParserOptions;
+use lightningcss::vendor_prefix::VendorPrefix;
 use taffy::geometry::Point;
 use taffy::prelude::*;
+use taffy::style::Overflow;
 
 /// 属性名 → lightningcss PropertyId（白名单）
 fn property_id_of(name: &str) -> Option<lightningcss::properties::PropertyId<'static>> {
-    use lightningcss::properties::{PropertyId, VendorPrefix};
+    use lightningcss::properties::PropertyId;
     Some(match name {
         "width" => PropertyId::Width,
         "height" => PropertyId::Height,
@@ -37,13 +40,10 @@ fn property_id_of(name: &str) -> Option<lightningcss::properties::PropertyId<'st
         "display" => PropertyId::Display,
         "position" => PropertyId::Position,
         "overflow" => PropertyId::Overflow,
-        "overflow-x" => PropertyId::OverflowX,
-        "overflow-y" => PropertyId::OverflowY,
         "gap" => PropertyId::Gap,
         "row-gap" => PropertyId::RowGap,
         "column-gap" => PropertyId::ColumnGap,
         "z-index" => PropertyId::ZIndex,
-        "flex" => PropertyId::Flex,
         "flex-grow" => PropertyId::FlexGrow,
         "flex-shrink" => PropertyId::FlexShrink,
         "flex-basis" => PropertyId::FlexBasis(VendorPrefix::None),
@@ -62,38 +62,70 @@ pub fn parse_prop(name: &str, value: &str) -> Option<Property<'static>> {
     Property::parse_string(pid, value, ParserOptions::default()).ok()
 }
 
-/// lightningcss LengthPercentage → taffy LengthPercentage
-fn tlp(v: &lightningcss::values::percentage::DimensionPercentage<lightningcss::values::length::Length>) -> LengthPercentage {
+/// calc 值 → 按 basis 折算的 Dimension（无法折算时 None）
+fn calc_dim(v: &impl lightningcss::traits::ToCss, basis: f32) -> Option<Dimension> {
+    let s = v.to_css_string(PrinterOptions::default()).ok()?;
+    let (pct, px) = parse_calc_pct_px(&s)?;
+    Some(Dimension::Length(basis * pct + px))
+}
+
+/// lightningcss DimensionPercentage<LengthValue> → taffy LengthPercentage
+fn tlp(v: &lightningcss::values::percentage::DimensionPercentage<lightningcss::values::length::LengthValue>, basis: f32) -> LengthPercentage {
+    use lightningcss::values::length::LengthValue;
     use lightningcss::values::percentage::DimensionPercentage as DP;
     match v {
-        DP::Dimension(l) => match l.value {
-            lightningcss::values::length::LengthValue::Px(v) => LengthPercentage::Length(v),
-            lightningcss::values::length::LengthValue::Em(v) => LengthPercentage::Length(v * 16.0),
-            lightningcss::values::length::LengthValue::Rem(v) => LengthPercentage::Length(v * 16.0),
-            lightningcss::values::length::LengthValue::Pt(v) => LengthPercentage::Length(v * 96.0 / 72.0),
+        DP::Dimension(lv) => LengthPercentage::Length(conv_len(lv)),
+        DP::Percentage(p) => LengthPercentage::Percent(p.0),
+        DP::Calc(c) => match calc_dim(c, basis) {
+            Some(Dimension::Length(l)) => LengthPercentage::Length(l),
+            Some(Dimension::Percent(p)) => LengthPercentage::Percent(p),
             _ => LengthPercentage::Length(0.0),
         },
-        DP::Percentage(p) => LengthPercentage::Percent(p.0),
-        DP::Calc(_) => LengthPercentage::Length(0.0),
     }
 }
 
-/// lightningcss LengthPercentageOrAuto → taffy LengthPercentageAuto
-fn tlpa(v: &lightningcss::values::percentage::DimensionPercentage<lightningcss::values::length::LengthPercentage>) -> LengthPercentageAuto {
+fn conv_len(lv: &lightningcss::values::length::LengthValue) -> f32 {
+    use lightningcss::values::length::LengthValue::*;
+    match lv {
+        Px(v) => *v,
+        Em(v) => v * 16.0,
+        Rem(v) => v * 16.0,
+        Pt(v) => v * 96.0 / 72.0,
+        Cm(v) => v * 96.0 / 2.54,
+        Mm(v) => v * 96.0 / 25.4,
+        In(v) => v * 96.0,
+        Q(v) => v * 96.0 / 101.6,
+        Pc(v) => v * 16.0,
+        _ => 0.0,
+    }
+}
+
+/// lightningcss DimensionPercentage<LengthValue> → taffy Dimension（auto 不会出现在此类型）
+fn tdim(v: &lightningcss::values::percentage::DimensionPercentage<lightningcss::values::length::LengthValue>, basis: f32) -> Dimension {
+    match tlp(v, basis) {
+        LengthPercentage::Length(l) => Dimension::Length(l),
+        LengthPercentage::Percent(p) => Dimension::Percent(p),
+    }
+}
+
+/// lightningcss DimensionPercentage<LengthPercentage>（LengthPercentageOrAuto 内层）→ taffy LengthPercentageAuto
+fn tlpa(v: &lightningcss::values::percentage::DimensionPercentage<lightningcss::values::length::LengthPercentage>, basis: f32) -> LengthPercentageAuto {
     use lightningcss::values::percentage::DimensionPercentage as DP;
     match v {
-        DP::Dimension(lp) => match lp.value {
-            lightningcss::values::length::LengthValue::Px(v) => LengthPercentageAuto::Length(v),
-            lightningcss::values::length::LengthValue::Em(v) => LengthPercentageAuto::Length(v * 16.0),
-            lightningcss::values::length::LengthValue::Rem(v) => LengthPercentageAuto::Length(v * 16.0),
-            _ => LengthPercentageAuto::Length(0.0),
+        DP::Dimension(lp) => match tlp(lp, basis) {
+            LengthPercentage::Length(l) => LengthPercentageAuto::Length(l),
+            LengthPercentage::Percent(p) => LengthPercentageAuto::Percent(p),
         },
         DP::Percentage(p) => LengthPercentageAuto::Percent(p.0),
-        DP::Calc(_) => LengthPercentageAuto::Length(0.0),
+        DP::Calc(c) => match calc_dim(c, basis) {
+            Some(Dimension::Length(l)) => LengthPercentageAuto::Length(l),
+            Some(Dimension::Percent(p)) => LengthPercentageAuto::Percent(p),
+            _ => LengthPercentageAuto::Auto,
+        },
     }
 }
 
-/// 解析后的属性集
+/// 解析后的属性集（basis 为百分比参照宽，一般为父容器宽）
 pub struct Resolved {
     pub width: Dimension,
     pub height: Dimension,
@@ -153,56 +185,47 @@ impl Default for Resolved {
     }
 }
 
-pub fn resolve(n: &StyleNode) -> Resolved {
+pub fn resolve(n: &StyleNode, width: f32) -> Resolved {
     let mut r = Resolved::default();
     for (k, v) in n.decls.iter() {
         if let Some(p) = parse_prop(k, v) {
-            apply(k, &p, &mut r);
+            apply(&p, width, &mut r);
         }
     }
     r
 }
 
-fn apply(name: &str, p: &Property, r: &mut Resolved) {
+fn apply(p: &Property, basis: f32, r: &mut Resolved) {
     use lightningcss::properties::Property as P;
-    let dim_of = |v: &lightningcss::values::percentage::DimensionPercentage<lightningcss::values::length::Length>| match tlp(v) {
-        LengthPercentage::Length(l) => Dimension::Length(l),
-        LengthPercentage::Percent(p) => Dimension::Percent(p),
-    };
-    let lp_dim = |v: &lightningcss::values::percentage::DimensionPercentage<lightningcss::values::length::LengthPercentage>| match tlpa(v) {
-        LengthPercentageAuto::Length(l) => Dimension::Length(l),
-        LengthPercentageAuto::Percent(p) => Dimension::Percent(p),
-        LengthPercentageAuto::Auto => Dimension::Auto,
-    };
     match p {
-        P::Width(v) => r.width = lp_dim(v),
-        P::Height(v) => r.height = lp_dim(v),
-        P::MinWidth(v) => r.min_width = dim_of(&dp_to_len(v)),
-        P::MinHeight(v) => r.min_height = dim_of(&dp_to_len(v)),
-        P::MaxWidth(v) => r.max_width = dim_of(&dp_to_len(v)),
-        P::MaxHeight(v) => r.max_height = dim_of(&dp_to_len(v)),
+        P::Width(v) => r.width = tdim(&v.0, basis),
+        P::Height(v) => r.height = tdim(&v.0, basis),
+        P::MinWidth(v) => r.min_width = tdim(&v.0, basis),
+        P::MinHeight(v) => r.min_height = tdim(&v.0, basis),
+        P::MaxWidth(v) => r.max_width = tdim(&v.0, basis),
+        P::MaxHeight(v) => r.max_height = tdim(&v.0, basis),
         P::Margin(m) => {
-            r.margin.top = tlpa(&m.top);
-            r.margin.right = tlpa(&m.right);
-            r.margin.bottom = tlpa(&m.bottom);
-            r.margin.left = tlpa(&m.left);
+            r.margin.top = tlpa(&m.top, basis);
+            r.margin.right = tlpa(&m.right, basis);
+            r.margin.bottom = tlpa(&m.bottom, basis);
+            r.margin.left = tlpa(&m.left, basis);
         }
         P::Padding(pd) => {
-            r.padding.top = tlp(&dp_to_len(&pd.top));
-            r.padding.right = tlp(&dp_to_len(&pd.right));
-            r.padding.bottom = tlp(&dp_to_len(&pd.bottom));
-            r.padding.left = tlp(&dp_to_len(&pd.left));
+            r.padding.top = tlp(&pd.top, basis);
+            r.padding.right = tlp(&pd.right, basis);
+            r.padding.bottom = tlp(&pd.bottom, basis);
+            r.padding.left = tlp(&pd.left, basis);
         }
-        P::Top(v) => r.inset.top = tlpa(v),
-        P::Right(v) => r.inset.right = tlpa(v),
-        P::Bottom(v) => r.inset.bottom = tlpa(v),
-        P::Left(v) => r.inset.left = tlpa(v),
+        P::Top(v) => r.inset.top = tlpa(v, basis),
+        P::Right(v) => r.inset.right = tlpa(v, basis),
+        P::Bottom(v) => r.inset.bottom = tlpa(v, basis),
+        P::Left(v) => r.inset.left = tlpa(v, basis),
         P::Display(d) => {
             use lightningcss::properties::display::{Display as LD, DisplayInside};
             r.display = match d {
                 LD::None => Display::None,
                 LD::Inside(DisplayInside::Flex(_)) => Display::Flex,
-                LD::Inside(DisplayInside::Grid(_)) => Display::Grid,
+                LD::Inside(DisplayInside::Grid) => Display::Grid,
                 _ => Display::Flex,
             };
         }
@@ -214,15 +237,18 @@ fn apply(name: &str, p: &Property, r: &mut Resolved) {
             };
         }
         P::Overflow(o) => {
-            r.overflow.x = ovk(&o.x);
-            r.overflow.y = ovk(&o.y);
+            // Overflow 字段私有 → 序列化后判断关键字
+            if let Ok(s) = o.to_css_string(PrinterOptions::default()) {
+                r.overflow.x = ov_str(&s);
+                r.overflow.y = s.split_whitespace().nth(1).map(ov_str).unwrap_or(r.overflow.x);
+            }
         }
         P::Gap(g) => {
-            r.gap.width = tlp(&dp_to_len(&g.row));
-            r.gap.height = tlp(&dp_to_len(&g.column));
+            r.gap.width = tlp(&g.row, basis);
+            r.gap.height = tlp(&g.column, basis);
         }
-        P::RowGap(v) => r.gap.width = tlp(&dp_to_len(v)),
-        P::ColumnGap(v) => r.gap.height = tlp(&dp_to_len(v)),
+        P::RowGap(v) => r.gap.width = tlp(v, basis),
+        P::ColumnGap(v) => r.gap.height = tlp(v, basis),
         P::ZIndex(z) => {
             if let lightningcss::properties::position::ZIndex::Integer(i) = z {
                 r.z_index = *i;
@@ -230,7 +256,7 @@ fn apply(name: &str, p: &Property, r: &mut Resolved) {
         }
         P::FlexGrow(v) => r.flex_grow = *v,
         P::FlexShrink(v) => r.flex_shrink = *v,
-        P::FlexBasis(v, _) => r.flex_basis = lp_dim(v),
+        P::FlexBasis(v, _) => r.flex_basis = tlpa(v, basis).into_dim(),
         P::FlexDirection(d) => {
             use lightningcss::properties::flex::FlexDirection::*;
             r.flex_direction = match d {
@@ -287,31 +313,25 @@ fn apply(name: &str, p: &Property, r: &mut Resolved) {
         }
         _ => {}
     }
-    let _ = name;
 }
 
-/// LengthPercentage 形态的值转 Length 形态（百分比保留）
-fn dp_to_len<'a>(
-    v: &'a lightningcss::values::percentage::DimensionPercentage<lightningcss::values::length::LengthPercentage>,
-) -> lightningcss::values::percentage::DimensionPercentage<lightningcss::values::length::Length> {
-    use lightningcss::values::percentage::DimensionPercentage as DP;
-    match v {
-        DP::Dimension(lp) => match &lp.value {
-            lightningcss::values::length::LengthValue::Px(v) => {
-                DP::Dimension(lightningcss::values::length::Length::px(*v))
-            }
-            _ => DP::Calc(Default::default()),
-        },
-        DP::Percentage(p) => DP::Percentage(*p),
-        DP::Calc(_) => DP::Calc(Default::default()),
+fn ov_str(s: &str) -> Overflow {
+    match s.trim() {
+        "hidden" | "clip" => Overflow::Hidden,
+        "scroll" | "auto" => Overflow::Scroll,
+        _ => Overflow::Visible,
     }
 }
 
-fn ovk(v: &lightningcss::properties::overflow::OverflowKeyword) -> Overflow {
-    use lightningcss::properties::overflow::OverflowKeyword::*;
-    match v {
-        Hidden | Clip => Overflow::Hidden,
-        Scroll | Auto => Overflow::Scroll,
-        Visible => Overflow::Visible,
+trait IntoDim {
+    fn into_dim(self) -> Dimension;
+}
+impl IntoDim for LengthPercentageAuto {
+    fn into_dim(self) -> Dimension {
+        match self {
+            LengthPercentageAuto::Length(l) => Dimension::Length(l),
+            LengthPercentageAuto::Percent(p) => Dimension::Percent(p),
+            LengthPercentageAuto::Auto => Dimension::Auto,
+        }
     }
 }

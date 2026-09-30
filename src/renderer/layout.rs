@@ -65,7 +65,7 @@ pub fn dim(v: &str, basis: f32) -> Dimension {
 }
 
 /// calc 表达式 → (百分比 0..1, 像素偏移)。支持 "100% - 400px" / "50% + 20px" 等二元形态
-fn parse_calc_pct_px(expr: &str) -> Option<(f32, f32)> {
+pub fn parse_calc_pct_px(expr: &str) -> Option<(f32, f32)> {
     let mut pct = 0.0f32;
     let mut px = 0.0f32;
     let mut matched = false;
@@ -110,7 +110,7 @@ fn lp(v: &str, basis: f32) -> LengthPercentage {
 fn style_of(n: &StyleNode, width: f32) -> Style {
     // 全量映射走 style::resolve（Lightning CSS 结构化），此处只补充 taffy 特有字段
     let d = |k: &str| n.decl(k).map(String::from);
-    let r = super::style::resolve(n);
+    let r = super::style::resolve(n, width);
     let display = d("display");
     let is_flex = display.as_deref() == Some("flex") || display.as_deref() == Some("inline-flex");
     // table-cell：均分父行宽度
