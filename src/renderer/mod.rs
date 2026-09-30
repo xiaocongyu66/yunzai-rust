@@ -44,9 +44,38 @@ pub fn render_op(args: &Value) -> Value {
         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
     match render(html, width, &font_dirs) {
-        Ok(png) => serde_json::json!({
-            "data": crate::util::bytes_to_base64(&png),
-        }),
+        Ok(png) => {
+            // 直接落盘返回路径：大 base64 过 bridge 传输曾被污染（PNG 头前混入垃圾字节）
+            let dir = std::path::Path::new("data/render");
+            let _ = std::fs::create_dir_all(dir);
+            let file = dir.join(format!(
+                "{}_{}.png",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0),
+                ulid_part(),
+            ));
+            match std::fs::write(&file, &png) {
+                Ok(_) => {
+                    let abs = std::fs::canonicalize(&file)
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| file.to_string_lossy().to_string());
+                    serde_json::json!({ "file": abs, "size": png.len() })
+                }
+                Err(e) => serde_json::json!({ "error": format!("写盘失败: {}", e) }),
+            }
+        }
         Err(e) => serde_json::json!({ "error": e }),
     }
+}
+
+/// 轻量随机后缀（无 ulid 依赖）
+fn ulid_part() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    format!("{:x}", n)
 }
