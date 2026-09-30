@@ -34,14 +34,19 @@ fn node_cfg(cfg: Option<&crate::config::Cfg>) -> (bool, u32, u64) {
 pub const EMBED_BRIDGE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/yz_bridge.node"));
 
 
-/// memfd 内存直载内嵌桥 → 返回 /proc/self/fd/<n> 路径（不落盘；fd 随进程生命周期）
+/// memfd 内存直载内嵌桥 → 返回 /dev/fd/<n> 路径（不落盘；fd 随进程生命周期）
+///
+/// 实证（ccb bun 1.4.2，2026-09）：dlopen 内存加载只有 /dev/fd/<n> 路径可用
+/// （/proc/self/fd/<n> → "file too short"；Buffer 形式 → ERR_DLOPEN_FAILED）。
+/// memfd 必须先 ftruncate 定长（初始 size=0）。fd 不 close：dlopen 以路径
+/// 字符串为缓存键，close 后 fd 复用会撞缓存（按模块常驻，进程内仅 1 个）。
 #[cfg(unix)]
 fn load_embedded_bridge_in_memory() -> anyhow::Result<PathBuf> {
     use std::io::Write;
     use std::os::fd::FromRawFd;
-    const AT_FDCWD: i32 = -100;
     extern "C" {
         fn memfd_create(name: *const u8, flags: u32) -> i32;
+        fn ftruncate(fd: i32, length: i64) -> i32;
     }
     // MFD_CLOEXEC = 0x0001；名字仅用于 /proc 展示
     let fd = unsafe { memfd_create(b"yz_bridge.node\0".as_ptr(), 0x0001) };
@@ -51,9 +56,12 @@ fn load_embedded_bridge_in_memory() -> anyhow::Result<PathBuf> {
     let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
     file.write_all(EMBED_BRIDGE)?;
     file.flush()?;
+    // memfd 初始 size=0，dlopen 前定长
+    if unsafe { ftruncate(fd, EMBED_BRIDGE.len() as i64) } != 0 {
+        anyhow::bail!("ftruncate 失败");
+    }
     std::mem::forget(file); // fd 保活至进程退出（node require 与 dlopen 都要读它）
-    let _ = AT_FDCWD;
-    Ok(PathBuf::from(format!("/proc/self/fd/{fd}")))
+    Ok(PathBuf::from(format!("/dev/fd/{fd}")))
 }
 
 pub struct JsEngine;

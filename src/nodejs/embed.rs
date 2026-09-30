@@ -32,8 +32,8 @@ pub fn start(libnode_path: PathBuf, bridge_path: PathBuf, host_path: PathBuf, ma
         .unwrap_or(host_path.clone())
         .to_string_lossy()
         .into_owned();
-    // /proc/self/fd/*（memfd 内存桥）必须保持原路径，canonicalize 会替换成 memfd 假名
-    let bridge_s = if bridge_path.starts_with("/proc/self/fd") {
+    // /dev/fd/*（memfd 内存桥）必须保持原路径，canonicalize 会替换成 memfd 假名
+    let bridge_s = if bridge_path.starts_with("/dev/fd") || bridge_path.starts_with("/proc/self/fd") {
         bridge_path.to_string_lossy().into_owned()
     } else {
         std::fs::canonicalize(&bridge_path)
