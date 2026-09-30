@@ -129,7 +129,7 @@ fn load_embedded_bridge() -> anyhow::Result<PathBuf> {
         return Ok(p);
     }
     #[cfg(target_os = "linux")]
-    crate::util::make_log1(crate::logger::Level::Info, Some("Node"), "memfd 不可用（proot/老内核？）→ shm 降级");
+    crate::util::make_log1(crate::logger::Level::Info, Some("Node"), "memfd 不可用（proot/老内核？）→ shm 降级".to_string());
 
     // 1'. macOS：shm_open + 立即 shm_unlink = 匿名内存对象（名字已消失，
     //     对象随 fd 生命周期，语义等价 memfd），/dev/fd/<fd> 喂 dlopen
@@ -138,7 +138,7 @@ fn load_embedded_bridge() -> anyhow::Result<PathBuf> {
         return Ok(p);
     }
     #[cfg(target_os = "macos")]
-    crate::util::make_log1(crate::logger::Level::Info, Some("Node"), "shm 匿名加载不可用 → tmpfs 降级");
+    crate::util::make_log1(crate::logger::Level::Info, Some("Node"), "shm 匿名加载不可用 → tmpfs 降级".to_string());
 
     // 2./3. tmpfs / tmpdir（磁盘零写路径：/dev/shm 与多数 tmpdir 是 RAM 介质；
     //    Windows 无内存 dlopen 路径（LoadLibrary 架构性只收路径），保留 temp 兜底）
