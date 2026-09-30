@@ -8,13 +8,18 @@
 pub mod css;
 pub mod dom;
 pub mod layout;
+pub mod media;
 pub mod paint;
 pub mod text;
 
 use serde_json::Value;
 
 /// 渲染 HTML → PNG。宽度默认 720，高度按内容自适应（上限 4096）。
-pub fn render(html: &str, width: u32, font_dirs: &[String]) -> Result<Vec<u8>, String> {
+/// HTML 相对资源的基准目录（img/background url 解析）
+pub static BASE_DIR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
+    let _ = BASE_DIR.set(base_dir.to_string());
     // 支持到 4K（3840）：宽度上限 4096；高度按内容自适应，保护上限 = 宽×4（防内存爆）
     let width = width.clamp(64, 4096) as f32;
 
@@ -26,7 +31,7 @@ pub fn render(html: &str, width: u32, font_dirs: &[String]) -> Result<Vec<u8>, S
     let mut fonts = text::TextEngine::load(font_dirs)?;
 
     // 3. 布局（按宽度约束算内容高度）
-    let tree = layout::build_tree(&styled, width, &mut fonts)?;
+    let tree = layout::build_tree(&styled, width, &mut fonts, base_dir)?;
     let (root_paint, total_h) = layout::compute(tree, width)?;
     let height = (total_h.ceil() as u32).clamp(1, (width as u32) * 4);
 
@@ -37,13 +42,17 @@ pub fn render(html: &str, width: u32, font_dirs: &[String]) -> Result<Vec<u8>, S
 /// op 层入口：JSON 参数 { html, width?, fontDirs? } → { data: base64, width, height }
 pub fn render_op(args: &Value) -> Value {
     let html = args.get("html").and_then(Value::as_str).unwrap_or("");
+    let base_dir = args
+        .get("baseDir")
+        .and_then(Value::as_str)
+        .unwrap_or(".");
     let width = args.get("width").and_then(Value::as_u64).unwrap_or(720) as u32;
     let font_dirs: Vec<String> = args
         .get("fontDirs")
         .and_then(Value::as_array)
         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
-    match render(html, width, &font_dirs) {
+    match render(html, width, &font_dirs, base_dir) {
         Ok(png) => {
             // 直接落盘返回路径：大 base64 过 bridge 传输曾被污染（PNG 头前混入垃圾字节）
             let dir = std::path::Path::new("data/render");

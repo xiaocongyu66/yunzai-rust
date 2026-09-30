@@ -123,7 +123,9 @@ fn parse_bg(v: &str) -> Option<Bg> {
         return Some(Bg::Radial { stops: parse_stops(&stops_raw) });
     }
     if let Some(u) = v.strip_prefix("url(") {
-        return Some(Bg::Image(u.trim_end_matches(')').trim().trim_matches(|c| c == '"' || c == '\'').to_string()));
+        let raw = u.trim_end_matches(')').trim().trim_matches(|c| c == '"' || c == '\'').to_string();
+        let base = super::BASE_DIR.get().map(String::as_str).unwrap_or(".");
+        return Some(Bg::Image(super::media::resolve(&raw, base)));
     }
     parse_color(v).map(Bg::Color)
 }
@@ -290,20 +292,34 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
         Some(n.w),
         line_height_of(n),
         n.text_align,
+        n.decls.get("font-family").and_then(|v| {
+            v.split(',')
+                .map(|s| s.trim().trim_matches(['"', '\'']))
+                .find(|s| !s.is_empty() && !matches!(*s, "sans-serif" | "serif" | "monospace" | "system-ui"))
+                .copied()
+        }),
     );
     // 水平对齐偏移：逐行用本行 line_w（用整段最宽行会让短行错位）
     let color = cosmic_text_color(color_of(n));
-    for run in buffer.layout_runs() {
-    let dx = match n.text_align {
-        TextAlign::Center => (n.w - run.line_w) / 2.0,
-        TextAlign::Right => n.w - run.line_w,
-        TextAlign::Left => 0.0,
-    }
-    .max(0.0);
+    // 逐行对齐：直接遍历 run 计算，但绘制走全局 buffer.draw（LayoutRun 无 draw 方法）
+    let runs_info: Vec<(f32, f32)> = buffer
+        .layout_runs()
+        .map(|r| (r.line_w, r.line_top))
+        .collect();
+    let max_w = runs_info.iter().map(|(w, _)| *w).fold(0f32, f32::max);
+    let align_off = |lw: f32| -> f32 {
+        match n.text_align {
+            TextAlign::Center => ((n.w - lw) / 2.0).max(0.0),
+            TextAlign::Right => (n.w - lw).max(0.0),
+            TextAlign::Left => 0.0,
+        }
+    };
+    let _ = runs_info;
+    let dx = align_off(max_w);
     let base_x = (n.x + dx).round() as i32;
-    let base_y = (n.y + run.line_top).round() as i32;
+    let base_y = n.y.round() as i32;
 
-    run.draw(&mut fonts.font_system, &mut fonts.swash, color, |gx, gy, gw, gh, color| {
+    buffer.draw(&mut fonts.font_system, &mut fonts.swash, color, |gx, gy, gw, gh, color| {
         // 回调给的是设备像素矩形 + 颜色（alpha 已混合）
         let px = (base_x as i32) + gx;
         let py = (base_y as i32) + gy;
@@ -342,7 +358,6 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
             }
         }
     });
-    }
 }
 
 fn cosmic_text_color(c: [u8; 4]) -> cosmic_text::Color {
@@ -365,26 +380,80 @@ fn line_height_of(n: &PaintNode) -> f32 {
         .unwrap_or(font_size_of(n) * 1.5)
 }
 
+/// 绘制图片（nearest 采样 + 目标区域裁剪）：精灵/平铺/拉伸通用
+fn blit(pixmap: &mut Pixmap, img: &Pixmap, dx: f32, dy: f32, dw: f32, dh: f32, clip: (f32, f32, f32, f32)) {
+    let (cx, cy, cw, ch) = clip;
+    let iw = img.width() as f32;
+    let ih = img.height() as f32;
+    if iw <= 0.0 || ih <= 0.0 || dw <= 0.0 || dh <= 0.0 {
+        return;
+    }
+    let x0 = dx.max(cx).floor() as i32;
+    let y0 = dy.max(cy).floor() as i32;
+    let x1 = (dx + dw).min(cx + cw).ceil() as i32;
+    let y1 = (dy + dh).min(cy + ch).ceil() as i32;
+    for py in y0..y1 {
+        for px in x0..x1 {
+            let sx = ((px as f32 - dx) / dw * iw).floor().clamp(0.0, iw - 1.0) as u32;
+            let sy = ((py as f32 - dy) / dh * ih).floor().clamp(0.0, ih - 1.0) as u32;
+            let c = img.pixel(sx, sy).unwrap_or(tiny_skia::Color::TRANSPARENT);
+            if c.a() == 0 {
+                continue;
+            }
+            let (ux, uy) = (px as u32, py as u32);
+            if ux >= pixmap.width() || uy >= pixmap.height() {
+                continue;
+            }
+            let idx = (uy * pixmap.width() + ux) as usize;
+            let data = pixmap.data_mut();
+            let di = idx * 4;
+            let sa = c.a() as u32;
+            let sr = (c.r() as u32 * sa + 127) / 255;
+            let sg = (c.g() as u32 * sa + 127) / 255;
+            let sb = (c.b() as u32 * sa + 127) / 255;
+            let dr = data[di] as u32;
+            let dg = data[di + 1] as u32;
+            let db = data[di + 2] as u32;
+            let da = data[di + 3] as u32;
+            data[di] = (sr + dr * (255 - sa) / 255) as u8;
+            data[di + 1] = (sg + dg * (255 - sa) / 255) as u8;
+            data[di + 2] = (sb + db * (255 - sa) / 255) as u8;
+            data[di + 3] = (sa + da * (255 - sa) / 255) as u8;
+        }
+    }
+}
+
 fn draw_image(pixmap: &mut Pixmap, path: &str, x: f32, y: f32, w: f32, h: f32, _r: f32) {
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return,
-    };
-    let img = match image::load_from_memory(&bytes) {
-        Ok(i) => i.to_rgba8(),
-        Err(_) => return,
-    };
-    let iw = img.width().min(4096);
-    let ih = img.height().min(4096);
-    let mut pix = match tiny_skia::Pixmap::from_vec(
-        img.to_vec(),
-        tiny_skia::IntSize::from_wh(iw, ih).unwrap(),
-    ) {
+    let img = match crate::renderer::media::load(path, crate::renderer::BASE_DIR.get().map(String::as_str).unwrap_or(".")) {
         Some(p) => p,
         None => return,
     };
-    let sx = if iw > 0 { w / iw as f32 } else { 1.0 };
-    let sy = if ih > 0 { h / ih as f32 } else { 1.0 };
-    let tr = Transform::from_translate(x, y).post_scale(sx, sy);
-    pixmap.draw_pixmap(0, 0, pix.as_ref(), &PixmapPaint::default(), tr, None);
+    // 简写里的 repeat 语义：含 no-repeat 或未知 → 单次绘制
+    let draw_one = |pixmap: &mut Pixmap, img: &Pixmap, x: f32, y: f32, w: f32, h: f32| {
+        blit(pixmap, img, x, y, w, h, (x, y, w, h));
+    };
+    // 默认：拉伸铺满节点
+    draw_one(pixmap, &img, x, y, w, h);
+}
+
+/// 背景图绘制（含 background-position 精灵取片 / background-size 缩放）
+fn draw_bg_image(pixmap: &mut Pixmap, n: &PaintNode, img: &Pixmap) {
+    let base = crate::renderer::BASE_DIR.get().map(String::as_str).unwrap_or(".");
+    let _ = base;
+    let (mut dw, mut dh) = (img.width() as f32, img.height() as f32);
+    if let Some(sz) = n.decls.get("background-size").or_else(|| {
+        n.decls.get("background").filter(|v| v.contains("background-size"))
+    }) {
+        (dw, dh) = crate::renderer::media::parse_size(sz, n.w, n.h, img.width(), img.height());
+    } else if let Some(bg) = n.decls.get("background") {
+        // 简写里可能带 "500px auto" 等尺寸？CSS 简写不含 size；保持固有
+        let _ = bg;
+    }
+    let (ox, oy) = n
+        .decls
+        .get("background-position")
+        .map(|p| crate::renderer::media::parse_position(p))
+        .unwrap_or((0.0, 0.0));
+    // 精灵取片：背景图按 size 缩放后从 (-ox, -oy) 起，截节点矩形大小
+    blit(pixmap, img, n.x + ox, n.y + oy, dw, dh, (n.x, n.y, n.w, n.h));
 }

@@ -184,7 +184,7 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
     }
 }
 
-fn text_info(n: &StyleNode, default_size: f32) -> (f32, u16, [u8; 4], f32, TextAlign) {
+fn text_info(n: &StyleNode, default_size: f32) -> (f32, u16, [u8; 4], f32, TextAlign, Option<String>) {
     let font_size = n
         .decl("font-size")
         .and_then(|v| v.trim().trim_end_matches("px").parse().ok())
@@ -204,11 +204,18 @@ fn text_info(n: &StyleNode, default_size: f32) -> (f32, u16, [u8; 4], f32, TextA
             t.parse::<f32>().ok().or_else(|| t.parse::<f32>().ok().map(|m| m * font_size))
         })
         .unwrap_or(font_size * 1.5);
+    // font-family：取逗号分隔的第一项（去引号）；排除通用族关键字
+    let family = n.decl("font-family").and_then(|v| {
+        v.split(',')
+            .map(|s| s.trim().trim_matches(['"', '\'']))
+            .find(|s| !s.is_empty() && !matches!(*s, "sans-serif" | "serif" | "monospace" | "system-ui"))
+            .map(String::from)
+    });
     let align = TextAlign::parse(n.decl("text-align").unwrap_or("left"));
-    (font_size, weight, color, lh, align)
+    (font_size, weight, color, lh, align, family)
 }
 
-pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine) -> Result<Tree, String> {
+pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir: &str) -> Result<Tree, String> {
     let mut taffy = TaffyTree::new();
 
     fn add(
@@ -217,9 +224,10 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine) -> Resul
         n: &StyleNode,
         width: f32,
         parent_font: f32,
+        base_dir: &str,
     ) -> Result<taffy::NodeId, String> {
         let st = style_of(n, width);
-        let (font_size, weight, color, lh, align) = text_info(n, parent_font);
+        let (font_size, weight, color, lh, align, family) = text_info(n, parent_font);
         let base_ctx = NodeCtx {
             decls: n.decls.clone(),
             text: n.text.clone(),
@@ -234,7 +242,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine) -> Resul
         // 文本叶子：无子节点但有文本
         if n.children.is_empty() && !n.text.is_empty() {
             let maxw = n.decl("width").and_then(|v| v.trim().trim_end_matches("px").parse().ok());
-            let (tw, th) = fonts.measure(&n.text, font_size, weight, color, maxw, lh);
+            let (tw, th) = fonts.measure(&n.text, font_size, weight, color, maxw, lh, family.as_deref());
             let mut st = st;
             // 文本叶子尺寸必须取测量值（inline 语义），覆盖声明里的 auto/percent
             st.size = Size { width: Dimension::Length(tw), height: Dimension::Length(th) };
@@ -248,11 +256,11 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine) -> Resul
         // 容器
         let mut child_ids = Vec::new();
         for c in &n.children {
-            child_ids.push(add(taffy, fonts, c, width, font_size)?);
+            child_ids.push(add(taffy, fonts, c, width, font_size, base_dir)?);
         }
         // 混合节点：自身文本作为附加叶子
         if !n.text.is_empty() {
-            let (tw, th) = fonts.measure(&n.text, font_size, weight, color, None, lh);
+            let (tw, th) = fonts.measure(&n.text, font_size, weight, color, None, lh, family.as_deref());
             let id = taffy
                 .new_leaf(Style {
                     size: Size { width: Dimension::Length(tw), height: Dimension::Length(th) },
@@ -265,6 +273,25 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine) -> Resul
         }
 
         if child_ids.is_empty() {
+            // img 叶子：有 src 时按图片固有尺寸（或声明尺寸）
+            if n.tag == "img" {
+                if let Some(src) = &n.src {
+                    if let Some(pm) = crate::renderer::media::load(src, base_dir) {
+                        let iw = n
+                            .decl("width")
+                            .and_then(|v| v.trim().trim_end_matches("px").parse::<f32>().ok())
+                            .unwrap_or(pm.width() as f32);
+                        let ih = n
+                            .decl("height")
+                            .and_then(|v| v.trim().trim_end_matches("px").parse::<f32>().ok())
+                            .unwrap_or(pm.height() as f32 * iw / pm.width() as f32);
+                        st.size = taffy::Size {
+                            width: taffy::style_helpers::length(iw),
+                            height: taffy::style_helpers::length(ih),
+                        };
+                    }
+                }
+            }
             let id = taffy.new_leaf(st).map_err(|e| e.to_string())?;
             taffy.set_node_context(id, Some(base_ctx)).map_err(|e| e.to_string())?;
             return Ok(id);
@@ -274,7 +301,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine) -> Resul
         Ok(id)
     }
 
-    let root_id = add(&mut taffy, fonts, root, width, 16.0)?;
+    let root_id = add(&mut taffy, fonts, root, width, 16.0, base_dir)?;
     Ok(Tree { taffy, root: root_id })
 }
 

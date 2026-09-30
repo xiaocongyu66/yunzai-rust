@@ -216,6 +216,11 @@ pub async fn buffer(data: Value, opts: &Value) -> Value {
     json!(s)
 }
 
+pub fn base64_to_bytes(s: &str) -> Option<Vec<u8>> {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.decode(s.trim()).ok()
+}
+
 pub fn bytes_to_base64(bytes: &[u8]) -> String {
     use base64::Engine;
     format!("base64://{}", base64::engine::general_purpose::STANDARD.encode(bytes))

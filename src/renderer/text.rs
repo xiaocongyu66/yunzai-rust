@@ -37,11 +37,16 @@ impl TextEngine {
         color: [u8; 4],
         max_width: Option<f32>,
         line_height: f32,
+        family: Option<&str>,
     ) -> (f32, f32) {
         let metrics = Metrics::new(font_size, line_height);
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
+        let family = match family {
+            Some(f) => Family::Name(f),
+            None => Family::SansSerif,
+        };
         let attrs = Attrs::new()
-            .family(Family::SansSerif)
+            .family(family)
             .weight(Weight(weight))
             .color(Color::rgba(color[0], color[1], color[2], color[3]));
         buffer.set_rich_text(
@@ -82,11 +87,16 @@ pub fn layout_buffer(
     max_width: Option<f32>,
     line_height: f32,
     align: TextAlign,
+    family: Option<&str>,
 ) -> Buffer {
     let metrics = Metrics::new(font_size, line_height);
     let mut buffer = Buffer::new(&mut engine.font_system, metrics);
     let color = Color::rgba(color[0], color[1], color[2], color[3]);
-    let attrs = Attrs::new().family(Family::SansSerif).weight(Weight(weight)).color(color);
+    let family = match family {
+        Some(f) => Family::Name(f),
+        None => Family::SansSerif,
+    };
+    let attrs = Attrs::new().family(family).weight(Weight(weight)).color(color);
     buffer.set_rich_text(
         &mut engine.font_system,
         [(text, attrs)],
