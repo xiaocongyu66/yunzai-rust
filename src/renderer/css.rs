@@ -139,7 +139,15 @@ fn apply_pseudo_rec(node: &mut StyleNode, rules: &[PseudoRule], ancestors: &[Nod
     if let Some(r) = be {
         let content = r.decls.get("content").cloned().unwrap_or_default();
         let content = content.trim_matches(|c| c == '"' || c == '\'').to_string();
-        let mut child = StyleNode::new("::before".to_string());
+        let mut child = StyleNode {
+            tag: "::before".to_string(),
+            id: None,
+            classes: Vec::new(),
+            decls: Default::default(),
+            text: String::new(),
+            children: Vec::new(),
+            src: None,
+        };
         child.decls = r.decls.clone();
         child.decls.remove("content");
         child.text = content;
@@ -148,7 +156,15 @@ fn apply_pseudo_rec(node: &mut StyleNode, rules: &[PseudoRule], ancestors: &[Nod
     if let Some(r) = af {
         let content = r.decls.get("content").cloned().unwrap_or_default();
         let content = content.trim_matches(|c| c == '"' || c == '\'').to_string();
-        let mut child = StyleNode::new("::after".to_string());
+        let mut child = StyleNode {
+            tag: "::after".to_string(),
+            id: None,
+            classes: Vec::new(),
+            decls: Default::default(),
+            text: String::new(),
+            children: Vec::new(),
+            src: None,
+        };
         child.decls = r.decls.clone();
         child.decls.remove("content");
         child.text = content;
