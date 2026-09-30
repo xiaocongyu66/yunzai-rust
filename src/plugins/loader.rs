@@ -253,7 +253,7 @@ impl PluginsLoader {
             }
         }
         // 上下文 hook
-        let hook = self.context_hook(&filtered, &e, engine.clone()).await;
+        let hook = self.context_hook(&filtered, &mut e, engine.clone()).await;
         if hook {
             return;
         }
@@ -415,7 +415,7 @@ impl PluginsLoader {
     async fn context_hook(
         &self,
         filtered: &[Arc<PluginEntry>],
-        e: &E,
+        e: &mut E,
         engine: Option<Arc<crate::nodejs::JsEngine>>,
     ) -> bool {
         for p in filtered {

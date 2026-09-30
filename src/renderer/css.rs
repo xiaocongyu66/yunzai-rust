@@ -49,7 +49,10 @@ pub fn parse_stylesheet_lc(css: &str) -> (Vec<CssRule>, Vec<(String, String)>) {
                     match prop {
                         FontFaceProperty::FontFamily(f) => {
                             if let lightningcss::properties::font::FontFamily::FamilyName(n) = f {
-                                fam = n.0.to_string();
+                                use lightningcss::traits::ToCss as _;
+                                if let Ok(v) = n.to_css_string(lc_opts()) {
+                                    fam = v.trim_matches(|c| c == '"' || c == '\'').to_string();
+                                }
                             }
                         }
                         FontFaceProperty::Source(list) => {

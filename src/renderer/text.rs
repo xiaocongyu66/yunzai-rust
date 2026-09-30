@@ -41,7 +41,11 @@ impl TextEngine {
         self.font_system.db_mut().load_font_data(data);
         // 找到新加的 face，取其内部真实 family 名
         if let Some(face) = self.font_system.db().faces().nth(before) {
-            let real = face.family.to_string();
+            let real = face
+                .families
+                .first()
+                .map(|(n, _)| n.clone())
+                .unwrap_or_else(|| css_family.to_string());
             self.font_aliases.insert(css_family.to_string(), real);
             crate::util::make_log1(
                 crate::logger::Level::Info,
