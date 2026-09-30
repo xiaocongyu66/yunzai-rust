@@ -34,10 +34,9 @@ pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> R
         crate::logger::Level::Info,
         Some("Renderer"),
         format!(
-            "样式收集：rules={} faces={} 别名前字体={}",
+            "样式收集：rules={} faces={}",
             css_rules.len(),
-            font_faces.len(),
-            fonts.font_aliases.len()
+            font_faces.len()
         ),
     );
 

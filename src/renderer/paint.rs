@@ -229,7 +229,7 @@ fn parse_transform(decl: &str, w: f32, h: f32) -> Option<Transform> {
             }
             "scalex" => Transform::from_scale(args.first().copied().unwrap_or(1.0), 1.0),
             "scaley" => Transform::from_scale(1.0, args.first().copied().unwrap_or(1.0)),
-            "rotate" => Transform::from_angle(args.first().copied().unwrap_or(0.0).to_radians()),
+            "rotate" => { let a = args.first().copied().unwrap_or(0.0).to_radians(); Transform { sx: a.cos(), kx: -a.sin(), ky: a.sin(), sy: a.cos(), tx: 0.0, ty: 0.0 } }
             "translate" => {
                 let tx = args.first().copied().unwrap_or(0.0);
                 let ty = args.get(1).copied().unwrap_or(0.0);
