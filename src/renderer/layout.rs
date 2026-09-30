@@ -30,6 +30,7 @@ pub struct NodeCtx {
     pub line_height: f32,
     pub align: TextAlign,
     pub src: Option<String>,
+    pub family: Option<String>,
 }
 
 pub struct Tree {
@@ -250,13 +251,8 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
             src: n.src.clone(),
         };
 
-        // 文本叶子：无子节点但有文本
+        // 文本叶子：无子节点但有文本（尺寸由 compute_layout_with_measure 按约束宽度动态换行）
         if n.children.is_empty() && !n.text.is_empty() {
-            let maxw = n.decl("width").and_then(|v| v.trim().trim_end_matches("px").parse().ok());
-            let (tw, th) = fonts.measure(&n.text, font_size, weight, color, maxw, lh, family.as_deref());
-            let mut st = st;
-            // 文本叶子尺寸必须取测量值（inline 语义），覆盖声明里的 auto/percent
-            st.size = Size { width: Dimension::Length(tw), height: Dimension::Length(th) };
             let id = taffy
                 .new_leaf(st)
                 .map_err(|e| e.to_string())?;
@@ -269,16 +265,11 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
         for c in &n.children {
             child_ids.push(add(taffy, fonts, c, width, font_size, base_dir)?);
         }
-        // 混合节点：自身文本作为附加叶子
+        // 混合节点：自身文本作为附加叶子（尺寸由 measure 决定）
         if !n.text.is_empty() {
-            let (tw, th) = fonts.measure(&n.text, font_size, weight, color, None, lh, family.as_deref());
             let id = taffy
-                .new_leaf(Style {
-                    size: Size { width: Dimension::Length(tw), height: Dimension::Length(th) },
-                    ..Default::default()
-                })
+                .new_leaf(Style::default())
                 .map_err(|e| e.to_string())?;
-            let _ = &st;
             taffy.set_node_context(id, Some(base_ctx.clone())).map_err(|e| e.to_string())?;
             child_ids.push(id);
         }
@@ -317,9 +308,35 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
 }
 
 /// 求布局并回填 PaintNode 树
-pub fn compute(mut tree: Tree, width: f32) -> Result<(PaintNode, f32), String> {
+pub fn compute(mut tree: Tree, width: f32, fonts: &mut TextEngine) -> Result<(PaintNode, f32), String> {
+    let space = Size { width: AvailableSpace::Definite(width), height: AvailableSpace::MaxContent };
     tree.taffy
-        .compute_layout(tree.root, Size { width: AvailableSpace::Definite(width), height: AvailableSpace::MaxContent })
+        .compute_layout_with_measure(tree.root, space, |known, _avail, _node, ctx, style| {
+            if let Some(ctx) = ctx {
+                if !ctx.text.is_empty() {
+                    // 约束宽度内动态换行；无约束时单行
+                    let declared = match style.size.width {
+                        Dimension::Length(l) => Some(l),
+                        _ => None,
+                    };
+                    let maxw = known.width.or(declared).filter(|w| *w > 0.0);
+                    let (tw, th) = fonts.measure(
+                        &ctx.text,
+                        ctx.font_size,
+                        ctx.weight,
+                        ctx.color,
+                        maxw,
+                        ctx.line_height,
+                        ctx.family.as_deref(),
+                    );
+                    return Size { width: tw, height: th };
+                }
+            }
+            Size {
+                width: known.width.unwrap_or(0.0),
+                height: known.height.unwrap_or(0.0),
+            }
+        })
         .map_err(|e| e.to_string())?;
     let total = tree.taffy.layout(tree.root).map_err(|e| e.to_string())?.size.height;
     let painted = collect(&mut tree.taffy, tree.root, 0.0, 0.0)?;
@@ -342,6 +359,7 @@ fn collect(taffy: &mut TaffyTree<NodeCtx>, id: taffy::NodeId, ox: f32, oy: f32) 
         line_height: 24.0,
         align: TextAlign::Left,
         src: None,
+        family: None,
     });
     let mut children = Vec::new();
     let kids = taffy.children(id).map_err(|e| e.to_string())?;

@@ -32,11 +32,13 @@ pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> R
 
     // 3. 布局（按宽度约束算内容高度）
     let tree = layout::build_tree(&styled, width, &mut fonts, base_dir)?;
-    let (root_paint, total_h) = layout::compute(tree, width)?;
-    let height = (total_h.ceil() as u32).clamp(1, (width as u32) * 4);
+    let (root_paint, total_h) = layout::compute(tree, width, &mut fonts)?;
+    // ≈ TRSS 按根元素实际尺寸截图：内容宽（body 显式 width）而非 viewport 宽
+    let out_w = (root_paint.w.ceil() as u32).clamp(64, 4096);
+    let height = (total_h.ceil() as u32).clamp(1, out_w * 4);
 
     // 4. 光栅化
-    paint::paint(&root_paint, width, height as f32, &mut fonts)
+    paint::paint(&root_paint, out_w as f32, height as f32, &mut fonts)
 }
 
 /// op 层入口：JSON 参数 { html, width?, fontDirs? } → { data: base64, width, height }
