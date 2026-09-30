@@ -399,7 +399,7 @@ fn blit(pixmap: &mut Pixmap, img: &Pixmap, dx: f32, dy: f32, dw: f32, dh: f32, c
                 Some(c) => c,
                 None => continue,
             };
-            if c.a() == 0 {
+            if c.alpha() == 0 {
                 continue;
             }
             let (ux, uy) = (px as u32, py as u32);
@@ -410,7 +410,12 @@ fn blit(pixmap: &mut Pixmap, img: &Pixmap, dx: f32, dy: f32, dw: f32, dh: f32, c
             let idx = (uy * pixmap.width() + ux) as usize;
             let data = pixmap.data_mut();
             let di = idx * 4;
-            let (sr, sg, sb, sa) = (c.r() as u32, c.g() as u32, c.b() as u32, c.a() as u32);
+            let (sr, sg, sb, sa) = (
+                c.red() as u32,
+                c.green() as u32,
+                c.blue() as u32,
+                c.alpha() as u32,
+            );
             let dr = data[di] as u32;
             let dg = data[di + 1] as u32;
             let db = data[di + 2] as u32;
