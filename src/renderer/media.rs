@@ -139,6 +139,24 @@ pub fn parse_position(v: &str) -> (f32, f32) {
 
 /// 解析 background-size：返回 (目标宽, 目标高)，None 表示 auto
 pub fn parse_size(v: &str, node_w: f32, node_h: f32, img_w: u32, img_h: u32) -> (f32, f32) {
+    // contain：完整放入节点（保持比例，可留白）；cover：铺满节点（保持比例，裁剪溢出）
+    let head = v.split_whitespace().next().unwrap_or("");
+    let iw = img_w as f32;
+    let ih = img_h as f32;
+    if head == "contain" {
+        let scale = (node_w / iw).min(node_h / ih);
+        if scale.is_finite() && scale > 0.0 {
+            return (iw * scale, ih * scale);
+        }
+        return (iw, ih);
+    }
+    if head == "cover" {
+        let scale = (node_w / iw).max(node_h / ih);
+        if scale.is_finite() && scale > 0.0 {
+            return (iw * scale, ih * scale);
+        }
+        return (iw, ih);
+    }
     let parts: Vec<&str> = v.split_whitespace().collect();
     let dim = |s: &str, base: f32, natural: f32| -> Option<f32> {
         let s = s.trim();
