@@ -204,7 +204,7 @@ impl E {
         self.reply_with(msg, false, json!({})).await
     }
 
-    pub async fn reply_with(&self, msg: Value, quote: bool, opts: Value) -> Result<Value, String> {
+    pub async fn reply_with(&self, mut msg: Value, quote: bool, opts: Value) -> Result<Value, String> {
         util::make_log1(Level::Debug, Some("reply"), format!("reply_with: len={}", util::string(&msg).len()));
         if msg.is_null() || msg == json!("") {
             return Ok(json!(false));
