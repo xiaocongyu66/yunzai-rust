@@ -209,6 +209,15 @@ impl E {
         if msg.is_null() || msg == json!("") {
             return Ok(json!(false));
         }
+        // ≈ TRSS segment 语义：纯 base64 大字符串按图片发（渲染器返回值）
+        if let J::String(ref raw) = msg {
+            if raw.len() > 512
+                && raw.starts_with("iVBOR")
+                && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+            {
+                msg = crate::segment::image(format!("base64://{}", raw), None);
+            }
+        }
         let mut msg = msg;
         let at = opts.get("at").cloned().unwrap_or(json!(""));
         if truthy(&at) && self.is_group() {
