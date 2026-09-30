@@ -276,7 +276,30 @@ async function instantiate(regKey, eJson) {
   const entry = registry.get(regKey)
   if (!entry) return null
   const e = buildE(regKey, eJson)
-  if (e && typeof e === 'object') e._plugin = entry.cls?.name ?? entry.name
+  if (e && typeof e === 'object') {
+    e._plugin = entry.cls?.name ?? entry.name
+    // ≈ e.runtime.render — 读 handlebars 模板 → op('render') 自研渲染器 → base64 png
+    e.runtime = {
+      render: async (plugin, tplPath, params, opts = {}) => {
+        const fs = await import('node:fs')
+        const Handlebars = (await import('handlebars')).default
+        const base = `${process.cwd()}/plugins/${plugin}/resources/${tplPath}`
+        const file = fs.existsSync(base) ? base : `${base}.html`
+        const tpl = fs.readFileSync(file, 'utf-8')
+        const data = { ...params }
+        if (typeof opts.beforeRender === 'function') {
+          const extra = opts.beforeRender({ data: {
+            ...data,
+            pluResPath: `${process.cwd()}/plugins/${plugin}/resources/`,
+          } })
+          Object.assign(data, extra ?? {})
+        }
+        const html = Handlebars.compile(tpl)(data)
+        const r = await op('render', { html, width: opts.scale ? Math.round(720 * opts.scale) : 720 })
+        return r?.data ?? null
+      },
+    }
+  }
   const inst = entry.inst ?? new entry.cls()
   inst.e = e
   if (typeof eJson === 'object' && eJson) {
