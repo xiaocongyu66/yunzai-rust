@@ -239,7 +239,9 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
                 }
             }
             Some(Bg::Image(path)) => {
-                draw_image(pixmap, &path, n.x, n.y, n.w, n.h, radius);
+                if let Some(img) = crate::renderer::media::load(&path, crate::renderer::BASE_DIR.get().map(String::as_str).unwrap_or(".")) {
+                    draw_bg_image(pixmap, n, &img);
+                }
             }
             None => {}
         }
