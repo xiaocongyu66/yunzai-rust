@@ -369,7 +369,7 @@ pub async fn op_async(name: &str, args: J) -> J {
         "http" => http_op(&args).await,
         "e_reply" => {
             // 无状态：直接用事件参数构造上下文（bot 从全局注册表取，与 recall 同模式）
-            let bot = GLOBAL_BOT.get().and_then(|b| b.get_bot(&s("self_id")));
+            let bot = GLOBAL_BOT.get().cloned();
             let ctx = json!({
                 "self_id": s("self_id"),
                 "group_id": args.get("group_id").cloned().unwrap_or(J::Null),
