@@ -6,73 +6,69 @@
 use super::dom::{CssRule, SelectorPart, StyleNode};
 use std::collections::BTreeMap;
 
-/// 解析一段 CSS 文本（含注释处理）为规则表
+/// 解析样式表：Lightning CSS 结构化遍历（Style 规则 + @font-face）
 pub fn parse_stylesheet(css: &str) -> Vec<CssRule> {
-    let css = strip_comments(css);
-    let mut rules = Vec::new();
-    let mut depth = 0usize;
-    let mut buf = String::new();
-    let mut sel_part = String::new();
-
-    for ch in css.chars() {
-        match ch {
-            '{' => {
-                if depth == 0 {
-                    sel_part = buf.trim().to_string();
-                    buf.clear();
-                }
-                depth += 1;
-                if depth > 1 {
-                    buf.push(ch);
-                }
-            }
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    let decls = parse_declarations(&buf);
-                    for sel in sel_part.split(',') {
-                        let sel = sel.trim();
-                        if sel.is_empty() {
-                            continue;
-                        }
-                        let (parts, spec) = compile_selector(sel);
-                        rules.push(CssRule { selector: parts, decls: decls.iter().cloned().collect(), specificity: spec });
-                    }
-                    buf.clear();
-                    sel_part.clear();
-                } else {
-                    buf.push(ch);
-                }
-            }
-            _ => {
-                if depth >= 1 {
-                    buf.push(ch);
-                } else {
-                    buf.push(ch);
-                }
-            }
-        }
-    }
-    rules
+    parse_stylesheet_lc(css).0
 }
 
-fn strip_comments(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '/' && chars.peek() == Some(&'*') {
-            chars.next();
-            while let Some(c) = chars.next() {
-                if c == '*' && chars.peek() == Some(&'/') {
-                    chars.next();
-                    break;
+/// 返回 (样式规则, @font-face 列表 [(family, url)])
+pub fn parse_stylesheet_lc(css: &str) -> (Vec<CssRule>, Vec<(String, String)>) {
+    use lightningcss::properties::font::{FontFamily, Source};
+    use lightningcss::rules::{CssRule, FontFaceProperty};
+    let mut out = Vec::new();
+    let mut faces: Vec<(String, String)> = Vec::new();
+    let Ok(ss) = lightningcss::stylesheet::StyleSheet::parse(css, lightningcss::stylesheet::ParserOptions::default()) else {
+        return (out, faces);
+    };
+    for rule in ss.rules.0.iter() {
+        match rule {
+            CssRule::Style(st) => {
+                let Ok(sel) = st.selectors.to_css_string(lc_opts()) else { continue };
+                // 伪类/伪元素暂不支持，跳过该规则
+                if sel.contains(':') {
+                    continue;
+                }
+                let mut decls: BTreeMap<String, String> = BTreeMap::new();
+                for d in st.declarations.declarations.iter() {
+                    serialize_decl(d, &mut decls);
+                }
+                let decls_vec: Vec<(String, String)> = decls.into_iter().collect();
+                for one in sel.split(',') {
+                    let one = one.trim();
+                    if one.is_empty() {
+                        continue;
+                    }
+                    let (parts, spec) = compile_selector(one);
+                    out.push(CssRule { selector: parts, decls: decls_vec.iter().cloned().collect(), specificity: spec });
                 }
             }
-        } else {
-            out.push(c);
+            CssRule::FontFace(ff) => {
+                let mut fam = String::new();
+                let mut src = String::new();
+                for prop in ff.properties.iter() {
+                    match prop {
+                        FontFaceProperty::FontFamily(f) => match f {
+                            FontFamily::FamilyName(n) => fam = n.name.clone(),
+                            FontFamily::Generic(_) => {}
+                        },
+                        FontFaceProperty::Source(list) => {
+                            for sv in list {
+                                if let Source::Url(u) = sv {
+                                    src = u.url.clone();
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if !fam.is_empty() && !src.is_empty() {
+                    faces.push((fam, src));
+                }
+            }
+            _ => {}
         }
     }
-    out
+    (out, faces)
 }
 
 /// `div.card > .name span` → [Tag(div), Class(card), Child, Class(name), Descendant, Tag(span)]
@@ -168,46 +164,52 @@ fn parse_declarations_lc(s: &str) -> Option<Vec<(String, String)>> {
     };
     let mut out = Vec::new();
     for decl in style.declarations.declarations.iter() {
-        let name = decl.property_id().name().to_string();
-        match decl {
-            Property::Padding(r) => {
-                out.push(("padding-top".into(), lc_val(&r.top)));
-                out.push(("padding-right".into(), lc_val(&r.right)));
-                out.push(("padding-bottom".into(), lc_val(&r.bottom)));
-                out.push(("padding-left".into(), lc_val(&r.left)));
+        serialize_decl(decl, &mut out);
+    }
+    Some(out)
+}
+
+/// 单条 lightningcss 声明 → (属性名, 值) 列表（简写展开 longhand）
+pub fn serialize_decl(d: &lightningcss::properties::Property, out: &mut Vec<(String, String)>) {
+    use lightningcss::properties::Property;
+    let name = d.property_id().name().to_string();
+    match d {
+        Property::Padding(r) => {
+            out.push(("padding-top".into(), lc_val(&r.top)));
+            out.push(("padding-right".into(), lc_val(&r.right)));
+            out.push(("padding-bottom".into(), lc_val(&r.bottom)));
+            out.push(("padding-left".into(), lc_val(&r.left)));
+        }
+        Property::Margin(r) => {
+            out.push(("margin-top".into(), lc_val(&r.top)));
+            out.push(("margin-right".into(), lc_val(&r.right)));
+            out.push(("margin-bottom".into(), lc_val(&r.bottom)));
+            out.push(("margin-left".into(), lc_val(&r.left)));
+        }
+        Property::Background(list) => {
+            for b in list {
+                out.push(("background-image".into(), lc_val(&b.image)));
+                out.push(("background-color".into(), lc_val(&b.color)));
+                out.push(("background-position".into(), lc_val(&b.position)));
+                out.push(("background-size".into(), lc_val(&b.size)));
+                out.push(("background-repeat".into(), lc_val(&b.repeat)));
             }
-            Property::Margin(r) => {
-                out.push(("margin-top".into(), lc_val(&r.top)));
-                out.push(("margin-right".into(), lc_val(&r.right)));
-                out.push(("margin-bottom".into(), lc_val(&r.bottom)));
-                out.push(("margin-left".into(), lc_val(&r.left)));
-            }
-            Property::Background(list) => {
-                for b in list {
-                    out.push(("background-image".into(), lc_val(&b.image)));
-                    out.push(("background-color".into(), lc_val(&b.color)));
-                    out.push(("background-position".into(), lc_val(&b.position)));
-                    out.push(("background-size".into(), lc_val(&b.size)));
-                    out.push(("background-repeat".into(), lc_val(&b.repeat)));
-                }
-            }
-            Property::Gap(g) => {
-                out.push(("row-gap".into(), lc_val(&g.row)));
-                out.push(("column-gap".into(), lc_val(&g.column)));
-            }
-            other => {
-                // 通用：Property 序列化输出为 "name: value"，剥掉前缀只留值
-                if let Ok(v) = other.to_css_string(false, lc_opts()) {
-                    let val = match v.split_once(':') {
-                        Some((_, rest)) => rest.trim().to_string(),
-                        None => v,
-                    };
-                    out.push((name, val));
-                }
+        }
+        Property::Gap(g) => {
+            out.push(("row-gap".into(), lc_val(&g.row)));
+            out.push(("column-gap".into(), lc_val(&g.column)));
+        }
+        other => {
+            // 通用：Property 序列化输出为 "name: value"，剥掉前缀只留值
+            if let Ok(v) = other.to_css_string(false, lc_opts()) {
+                let val = match v.split_once(':') {
+                    Some((_, rest)) => rest.trim().to_string(),
+                    None => v,
+                };
+                out.push((name, val));
             }
         }
     }
-    Some(out)
 }
 
 /// 带浏览器 targets 的序列化选项（空 targets 会让部分属性序列化失败返回空）
@@ -379,4 +381,25 @@ fn simple_matches(p: &SelectorPart, s: &str) -> bool {
         SelectorPart::Id(i) => i == s,
         _ => false,
     }
+}
+
+/// @font-face 别名替换：遍历样式树，把 font-family 里引用的别名换成字体内部真实名
+pub fn apply_font_aliases(
+    mut n: StyleNode,
+    fonts: &super::text::TextEngine,
+) -> StyleNode {
+    if let Some(ff) = n.decls.get("font-family").cloned() {
+        let parts: Vec<String> = ff
+            .split(',')
+            .map(|seg| {
+                let seg = seg.trim().trim_matches(|c| c == '"' || c == '\'').to_string();
+                fonts.resolve_family(&seg).to_string()
+            })
+            .collect();
+        n.decls.insert("font-family".into(), parts.join(", "));
+    }
+    for c in n.children.iter_mut() {
+        *c = apply_font_aliases(std::mem::take(c), fonts);
+    }
+    n
 }

@@ -216,7 +216,7 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
     if n.tag == "img" {
         if let Some(src) = &n.src {
             if let Some(img) = crate::renderer::media::load(src, crate::renderer::BASE_DIR.get().map(String::as_str).unwrap_or(".")) {
-                blit(pixmap, &img, n.x, n.y, n.w, n.h, (n.x, n.y, n.w, n.h));
+                blit_r(pixmap, &img, n.x, n.y, n.w, n.h, (n.x, n.y, n.w, n.h), radius);
             }
         }
     }
@@ -406,6 +406,11 @@ fn line_height_of(n: &PaintNode) -> f32 {
 
 /// 绘制图片（nearest 采样 + 目标区域裁剪）：精灵/平铺/拉伸通用
 fn blit(pixmap: &mut Pixmap, img: &Pixmap, dx: f32, dy: f32, dw: f32, dh: f32, clip: (f32, f32, f32, f32)) {
+    blit_r(pixmap, img, dx, dy, dw, dh, clip, 0.0)
+}
+
+/// 带圆角裁剪的 blit（背景图不溢出 border-radius）
+fn blit_r(pixmap: &mut Pixmap, img: &Pixmap, dx: f32, dy: f32, dw: f32, dh: f32, clip: (f32, f32, f32, f32), radius: f32) {
     let (cx, cy, cw, ch) = clip;
     let iw = img.width() as f32;
     let ih = img.height() as f32;
@@ -420,6 +425,17 @@ fn blit(pixmap: &mut Pixmap, img: &Pixmap, dx: f32, dy: f32, dw: f32, dh: f32, c
         for px in x0..x1 {
             let sx = ((px as f32 - dx) / dw * iw).floor().clamp(0.0, iw - 1.0) as u32;
             let sy = ((py as f32 - dy) / dh * ih).floor().clamp(0.0, ih - 1.0) as u32;
+            if radius > 0.0 {
+                // 圆角内判断：像素点到圆角矩形内切盒的钳制点距离
+                let (cx0, cy0, cw0, ch0) = clip;
+                let qx = (px as f32).clamp(cx0 + radius, cx0 + cw0 - radius);
+                let qy = (py as f32).clamp(cy0 + radius, cy0 + ch0 - radius);
+                let ddx = px as f32 - qx;
+                let ddy = py as f32 - qy;
+                if ddx * ddx + ddy * ddy > radius * radius {
+                    continue;
+                }
+            }
             let c = match img.pixel(sx, sy) {
                 Some(c) => c,
                 None => continue,
@@ -491,15 +507,20 @@ fn draw_bg_image(pixmap: &mut Pixmap, n: &PaintNode, img: &Pixmap) {
             .get("background-repeat")
             .map(|v| v.contains("no-repeat"))
             .unwrap_or(false);
+    let radius = n
+        .decls
+        .get("border-radius")
+        .and_then(|v| split_commas(v).first().and_then(|r| r.trim().trim_end_matches("px").parse::<f32>().ok()))
+        .unwrap_or(0.0);
     if no_repeat {
         // 精灵取片：背景图按 size 缩放后偏移 ox,oy，裁到节点矩形
-        blit(pixmap, img, n.x + ox, n.y + oy, dw, dh, (n.x, n.y, n.w, n.h));
+        blit_r(pixmap, img, n.x + ox, n.y + oy, dw, dh, (n.x, n.y, n.w, n.h), radius);
     } else {
         let mut ty = n.y + oy;
         while ty < n.y + n.h {
             let mut tx = n.x + ox;
             while tx < n.x + n.w {
-                blit(pixmap, img, tx, ty, dw, dh, (n.x, n.y, n.w, n.h));
+                blit_r(pixmap, img, tx, ty, dw, dh, (n.x, n.y, n.w, n.h), radius);
                 if dw <= 0.0 { break; }
                 tx += dw;
             }

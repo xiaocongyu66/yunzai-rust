@@ -24,11 +24,17 @@ pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> R
     let width = width.clamp(64, 4096) as f32;
 
     // 1. 解析 DOM + 收集样式（<style> 块 + inline style + 选择器匹配）
-    let (root_node, rules) = dom::parse_with_base(html, base_dir)?;
+    let (root_node, rules, font_faces) = dom::parse_with_base(html, base_dir)?;
     let styled = css::apply_styles(root_node, &rules);
 
-    // 2. 字体系统
+    // 2. 字体系统（先加载插件字体，再注册 @font-face 别名）
     let mut fonts = text::TextEngine::load(font_dirs)?;
+    for (fam, url) in &font_faces {
+        let path = crate::renderer::media::resolve(url, base_dir);
+        fonts.load_face_file(&path, fam);
+    }
+    // font-family 别名替换（@font-face 引用名 → 字体内部真实名）
+    let styled = css::apply_font_aliases(styled, &fonts);
 
     // 3. 布局（按宽度约束算内容高度）
     let tree = layout::build_tree(&styled, width, &mut fonts, base_dir)?;

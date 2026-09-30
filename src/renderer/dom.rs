@@ -48,7 +48,7 @@ pub fn parse(html: &str) -> Result<(StyleNode, Vec<CssRule>), String> {
     parse_with_base(html, ".")
 }
 
-pub fn parse_with_base(html: &str, base_dir: &str) -> Result<(StyleNode, Vec<CssRule>), String> {
+pub fn parse_with_base(html: &str, base_dir: &str) -> Result<(StyleNode, Vec<CssRule>, Vec<(String, String)>), String> {
     let dom: RcDom = parse_document(RcDom::default(), Default::default())
         .from_utf8()
         .one(html.as_bytes());
@@ -96,7 +96,8 @@ pub fn parse_with_base(html: &str, base_dir: &str) -> Result<(StyleNode, Vec<Css
         }
     }
 
-    rules = crate::renderer::css::parse_stylesheet(&styles);
+    let (parsed_rules, font_faces) = crate::renderer::css::parse_stylesheet_lc(&styles);
+    rules = parsed_rules;
 
     let mut root = build(&dom.document);
     // 取 body（没有则用整个树）
@@ -105,7 +106,7 @@ pub fn parse_with_base(html: &str, base_dir: &str) -> Result<(StyleNode, Vec<Css
     } else if let Some(idx) = root.children.iter().position(|c| c.tag == "body") {
         root = root.children.remove(idx);
     }
-    Ok((root, rules))
+    Ok((root, rules, font_faces))
 }
 
 fn walk(h: &Handle, f: &mut impl FnMut(&Handle)) {

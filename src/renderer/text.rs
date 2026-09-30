@@ -1,9 +1,12 @@
 //! cosmic-text 封装：字体系统、文本测量、字形光栅化
 
 use cosmic_text::{Attrs, AttrsList, Buffer, Color, Family, FontSystem, Metrics, SwashCache, Weight};
+use std::collections::HashMap;
 
 pub struct TextEngine {
     pub font_system: FontSystem,
+    /// @font-face 别名表：CSS 引用名 → 字体文件内部真实 family 名
+    pub font_aliases: HashMap<String, String>,
     pub swash: SwashCache,
 }
 
@@ -25,7 +28,32 @@ impl TextEngine {
             }
         }
         crate::util::make_log1(crate::logger::Level::Info, Some("Renderer"), format!("字体系统就绪（额外字体 {loaded}）"));
-        Ok(TextEngine { font_system: fs, swash: SwashCache::new() })
+        Ok(TextEngine { font_system: fs, swash: SwashCache::new(), font_aliases: HashMap::new() })
+    }
+
+    /// 加载 @font-face 指向的字体文件，注册别名（CSS family 名 → 字体内部真实名）
+    pub fn load_face_file(&mut self, path: &str, css_family: &str) {
+        if self.font_aliases.contains_key(css_family) {
+            return;
+        }
+        let Ok(data) = std::fs::read(path) else { return };
+        let before = self.font_system.db().faces().count();
+        self.font_system.db_mut().load_font_data(data);
+        // 找到新加的 face，取其内部真实 family 名
+        if let Some(face) = self.font_system.db().faces().nth(before) {
+            let real = face.family.to_string();
+            self.font_aliases.insert(css_family.to_string(), real);
+            crate::util::make_log1(
+                crate::logger::Level::Info,
+                Some("Renderer"),
+                format!("自定义字体 {} → {}", css_family, path),
+            );
+        }
+    }
+
+    /// CSS family 别名解析：命中 @font-face 别名时替换为字体内部真实名
+    pub fn resolve_family<'a>(&'a self, name: &'a str) -> &'a str {
+        self.font_aliases.get(name).map(String::as_str).unwrap_or(name)
     }
 
     /// 排版一段文本，返回布局尺寸（宽 = 最长行，高 = 总行高）与行数
