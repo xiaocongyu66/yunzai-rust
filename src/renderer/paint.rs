@@ -291,18 +291,19 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
         line_height_of(n),
         n.text_align,
     );
-    // 水平对齐偏移
-    let line_w = buffer.layout_runs().map(|r| r.line_w).fold(0f32, f32::max);
+    // 水平对齐偏移：逐行用本行 line_w（用整段最宽行会让短行错位）
+    let color = cosmic_text_color(color_of(n));
+    for run in buffer.layout_runs() {
     let dx = match n.text_align {
-        TextAlign::Center => (n.w - line_w) / 2.0,
-        TextAlign::Right => n.w - line_w,
+        TextAlign::Center => (n.w - run.line_w) / 2.0,
+        TextAlign::Right => n.w - run.line_w,
         TextAlign::Left => 0.0,
     }
     .max(0.0);
-    let base_x = (n.x + dx).round();
-    let base_y = n.y.round();
+    let base_x = (n.x + dx).round() as i32;
+    let base_y = (n.y + run.line_top).round() as i32;
 
-    buffer.draw(&mut fonts.font_system, &mut fonts.swash, cosmic_text_color(color_of(n)), |gx, gy, gw, gh, color| {
+    run.draw(&mut fonts.font_system, &mut fonts.swash, color, |gx, gy, gw, gh, color| {
         // 回调给的是设备像素矩形 + 颜色（alpha 已混合）
         let px = (base_x as i32) + gx;
         let py = (base_y as i32) + gy;
@@ -341,6 +342,7 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
             }
         }
     });
+    }
 }
 
 fn cosmic_text_color(c: [u8; 4]) -> cosmic_text::Color {
