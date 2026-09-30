@@ -108,139 +108,33 @@ fn lp(v: &str, basis: f32) -> LengthPercentage {
 }
 
 fn style_of(n: &StyleNode, width: f32) -> Style {
+    // 全量映射走 style::resolve（Lightning CSS 结构化），此处只补充 taffy 特有字段
     let d = |k: &str| n.decl(k).map(String::from);
+    let r = super::style::resolve(n);
     let display = d("display");
     let is_flex = display.as_deref() == Some("flex") || display.as_deref() == Some("inline-flex");
-    let flex_direction = match d("flex-direction").as_deref() {
-        Some("column") => FlexDirection::Column,
-        Some("column-reverse") => FlexDirection::ColumnReverse,
-        Some("row-reverse") => FlexDirection::RowReverse,
-        _ => FlexDirection::Row,
-    };
-    // 非 flex 的容器：近似 block = flex column；table-row 近似 flex row（table-cell 横排）
-    let is_table_row = display.as_deref() == Some("table-row");
-    let dir = if is_table_row {
-        FlexDirection::Row
-    } else if is_flex {
-        flex_direction
-    } else {
-        FlexDirection::Column
-    };
     // table-cell：均分父行宽度
     let cell_grow = if display.as_deref() == Some("table-cell") { 1.0 } else { 0.0 };
 
-    let justify = match d("justify-content").as_deref().unwrap_or("") {
-        "center" => JustifyContent::Center,
-        "flex-end" | "end" => JustifyContent::FlexEnd,
-        "space-between" => JustifyContent::SpaceBetween,
-        "space-around" => JustifyContent::SpaceAround,
-        "space-evenly" => JustifyContent::SpaceEvenly,
-        _ => JustifyContent::FlexStart,
-    };
-    let align_items = match d("align-items").as_deref().unwrap_or("") {
-        "center" => AlignItems::Center,
-        "flex-end" | "end" => AlignItems::FlexEnd,
-        "stretch" => AlignItems::Stretch,
-        "baseline" => AlignItems::Baseline,
-        // block 容器（近似 flex column）默认 stretch：块级子元素撑满父宽
-        _ => if is_flex { AlignItems::FlexStart } else { AlignItems::Stretch },
-    };
-    let wrap = match d("flex-wrap").as_deref().unwrap_or("") {
-        "wrap" => FlexWrap::Wrap,
-        _ => FlexWrap::NoWrap,
-    };
-    let gap_parts: Vec<String> = d("gap")
-        .map(|s| s.split_whitespace().map(String::from).collect())
-        .unwrap_or_default();
-    let (gx, gy) = match gap_parts.len() {
-        0 => ("0".into(), "0".into()),
-        1 => (gap_parts[0].clone(), gap_parts[0].clone()),
-        _ => (gap_parts[0].clone(), gap_parts[1].clone()),
-    };
-
-    // padding/margin 简写展开（CSS 简写是空格分隔：12px 0 12px 50px）
-    let sides = |name: &str| -> Vec<String> {
-        d(name)
-            .map(|s| s.split_whitespace().map(String::from).collect())
-            .unwrap_or_default()
-    };
-    let expand = |v: &[String], def: &str| -> (String, String, String, String) {
-        match v.len() {
-            0 => (def.into(), def.into(), def.into(), def.into()),
-            1 => (v[0].clone(), v[0].clone(), v[0].clone(), v[0].clone()),
-            2 => (v[0].clone(), v[1].clone(), v[0].clone(), v[1].clone()),
-            3 => (v[0].clone(), v[1].clone(), v[2].clone(), v[1].clone()),
-            _ => (v[0].clone(), v[1].clone(), v[2].clone(), v[3].clone()),
-        }
-    };
-    let (pt, pr, pb, pl) = expand(&sides("padding"), "0");
-    let (mt, mr, mb, ml) = expand(&sides("margin"), "0");
-    // longhand（Lightning CSS 展开）覆盖简写展开值
-    let pt = d("padding-top").unwrap_or(pt);
-    let pr = d("padding-right").unwrap_or(pr);
-    let pb = d("padding-bottom").unwrap_or(pb);
-    let pl = d("padding-left").unwrap_or(pl);
-    let mt = d("margin-top").unwrap_or(mt);
-    let mr = d("margin-right").unwrap_or(mr);
-    let mb = d("margin-bottom").unwrap_or(mb);
-    let ml = d("margin-left").unwrap_or(ml);
-    let gx = d("column-gap").unwrap_or(gx);
-    let gy = d("row-gap").unwrap_or(gy);
-
     Style {
-        display: match display.as_deref() {
-            Some("none") => Display::None,
-            _ => Display::Flex,
-        },
-        flex_direction: dir,
-        justify_content: Some(justify),
-        align_items: Some(align_items),
-        align_self: match d("align-self").as_deref().unwrap_or("") {
-            "center" => Some(AlignSelf::Center),
-            "flex-end" => Some(AlignSelf::FlexEnd),
-            "stretch" => Some(AlignSelf::Stretch),
-            _ => None,
-        },
-        flex_wrap: wrap,
-        gap: Size { width: lp(&gx, width), height: lp(&gy, width) },
-        padding: Rect {
-            top: lp(&pt, width),
-            right: lp(&pr, width),
-            bottom: lp(&pb, width),
-            left: lp(&pl, width),
-        },
-        margin: Rect {
-            top: lp(&mt, width).into(),
-            right: lp(&mr, width).into(),
-            bottom: lp(&mb, width).into(),
-            left: lp(&ml, width).into(),
-        },
-        size: Size {
-            width: dim(d("width").as_deref().unwrap_or("auto"), width),
-            height: dim(d("height").as_deref().unwrap_or("auto"), width),
-        },
-        min_size: Size {
-            width: dim(d("min-width").as_deref().unwrap_or("auto"), width),
-            height: dim(d("min-height").as_deref().unwrap_or("auto"), width),
-        },
-        max_size: Size {
-            width: dim(d("max-width").as_deref().unwrap_or("auto"), width),
-            height: dim(d("max-height").as_deref().unwrap_or("auto"), width),
-        },
-        flex_grow: d("flex-grow")
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(cell_grow),
-        flex_shrink: d("flex-shrink").and_then(|v| v.trim().parse().ok()).unwrap_or(1.0),
-        position: match d("position").as_deref().unwrap_or("") {
-            "absolute" => Position::Absolute,
-            _ => Position::Relative,
-        },
-        inset: Rect {
-            top: lpa(d("top").as_deref().unwrap_or("auto"), width),
-            right: lpa(d("right").as_deref().unwrap_or("auto"), width),
-            bottom: lpa(d("bottom").as_deref().unwrap_or("auto"), width),
-            left: lpa(d("left").as_deref().unwrap_or("auto"), width),
-        },
+        display: r.display,
+        position: r.position,
+        inset: r.inset,
+        size: Size { width: r.width, height: r.height },
+        min_size: Size { width: r.min_width, height: r.min_height },
+        max_size: Size { width: r.max_width, height: r.max_height },
+        margin: r.margin,
+        padding: r.padding,
+        gap: r.gap,
+        flex_direction: r.flex_direction,
+        flex_wrap: r.flex_wrap,
+        flex_basis: r.flex_basis,
+        flex_grow: if cell_grow > 0.0 { cell_grow } else { r.flex_grow },
+        flex_shrink: r.flex_shrink,
+        justify_content: r.justify_content,
+        align_items: r.align_items,
+        align_content: r.align_content,
+        overflow: r.overflow,
         ..Default::default()
     }
 }

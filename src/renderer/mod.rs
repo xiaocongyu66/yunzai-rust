@@ -10,6 +10,7 @@ pub mod dom;
 pub mod layout;
 pub mod media;
 pub mod paint;
+pub mod style;
 pub mod text;
 
 use serde_json::Value;
