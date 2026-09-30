@@ -216,6 +216,8 @@ impl JsEngine {
         write_eco_shims(Path::new("."), &bridge_path.to_string_lossy())?;
 
         let (_, mos, _timeout_s) = node_cfg(cfg.map(|c| &**c));
+        // async op 回传需要主 runtime Handle（napi 回调线程无 tokio 上下文）
+        let _ = crate::nodejs::host::MAIN_HANDLE.set(tokio::runtime::Handle::current());
         embed::start(lib_path, bridge_path, host_path, mos)?;
         if !host::wait_ready(Duration::from_secs(30)).await {
             return Err(anyhow::anyhow!("[Node] host.mjs 30s 内未就绪（嵌入失败，详见日志）"));
