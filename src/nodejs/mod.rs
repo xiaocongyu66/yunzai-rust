@@ -63,7 +63,8 @@ fn load_embedded_bridge() -> anyhow::Result<PathBuf> {
         }
     }
 
-    // 1. memfd → /dev/fd/<fd>
+    // 1. memfd → /dev/fd/<fd>（Linux 专属 syscall；macOS 无此符号，unix 门会炸链接）
+    #[cfg(target_os = "linux")]
     if let Some(p) = (|| -> Option<PathBuf> {
         use std::io::Write;
         use std::os::fd::FromRawFd;
