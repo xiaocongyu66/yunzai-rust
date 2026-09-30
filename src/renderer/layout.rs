@@ -17,6 +17,7 @@ pub struct PaintNode {
     pub text_align: TextAlign,
     pub children: Vec<PaintNode>,
     pub src: Option<String>,
+    pub tag: String,
 }
 
 /// taffy 节点上下文（所有节点）：样式声明 + 文本信息
@@ -31,6 +32,7 @@ pub struct NodeCtx {
     pub align: TextAlign,
     pub src: Option<String>,
     pub family: Option<String>,
+    pub tag: String,
 }
 
 pub struct Tree {
@@ -115,7 +117,7 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
         "wrap" => FlexWrap::Wrap,
         _ => FlexWrap::NoWrap,
     };
-    let gap_parts = d("gap")
+    let gap_parts: Vec<String> = d("gap")
         .map(|s| s.split_whitespace().map(String::from).collect())
         .unwrap_or_default();
     let (gx, gy) = match gap_parts.len() {
@@ -265,6 +267,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
             align,
             src: n.src.clone(),
             family,
+            tag: n.tag.clone(),
         };
 
         // 文本叶子：无子节点但有文本（尺寸由 compute_layout_with_measure 按约束宽度动态换行）
@@ -376,6 +379,7 @@ fn collect(taffy: &mut TaffyTree<NodeCtx>, id: taffy::NodeId, ox: f32, oy: f32) 
         align: TextAlign::Left,
         src: None,
         family: None,
+        tag: String::new(),
     });
     let mut children = Vec::new();
     let kids = taffy.children(id).map_err(|e| e.to_string())?;
@@ -392,5 +396,6 @@ fn collect(taffy: &mut TaffyTree<NodeCtx>, id: taffy::NodeId, ox: f32, oy: f32) 
         text_align: ctx.align,
         children,
         src: ctx.src,
+        tag: ctx.tag,
     })
 }
