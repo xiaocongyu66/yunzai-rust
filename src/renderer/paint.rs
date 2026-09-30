@@ -193,11 +193,31 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
     if n.w <= 0.0 || n.h <= 0.0 {
         return;
     }
+    // border-radius 多值（四角独立，取逗号分隔后的组内值）
     let radius = n
         .decls
         .get("border-radius")
-        .and_then(|v| split_commas(v).first().and_then(|r| r.trim().trim_end_matches("px").parse::<f32>().ok()))
+        .and_then(|v| split_commas(v).first().cloned())
+        .map(|g| {
+            let vals: Vec<f32> = g
+                .split_whitespace()
+                .filter_map(|t| t.trim().trim_end_matches("px").parse::<f32>().ok())
+                .collect();
+            vals.first().copied().unwrap_or(0.0)
+        })
         .unwrap_or(0.0);
+    // opacity（0..1）：预乘到背景/文本颜色
+    let opacity = n
+        .decls
+        .get("opacity")
+        .and_then(|v| v.trim().trim_end_matches(';').parse::<f32>().ok())
+        .filter(|v| *v >= 0.0 && *v <= 1.0)
+        .unwrap_or(1.0);
+
+    // box-shadow（多重，先画外层阴影再画内容）
+    if let Some(bs) = n.decls.get("box-shadow") {
+        draw_box_shadows(pixmap, n, bs, radius);
+    }
 
     // 背景图（Lightning CSS 已把 background 简写展开为 background-image 等长属性）
     if n.tag != "img" {
@@ -227,7 +247,7 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
             Some(Bg::Color(c)) => {
                 let path = rounded_rect_path(n.x, n.y, n.w, n.h, radius);
                 let mut p = Paint::default();
-                p.set_color_rgba8(c[0], c[1], c[2], c[3]);
+                p.set_color_rgba8(c[0], c[1], c[2], (c[3] as f32 * opacity) as u8);
                 p.anti_alias = true;
                 pixmap.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
             }
@@ -291,7 +311,7 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
             .unwrap_or([0, 0, 0, 255]);
         let path = rounded_rect_path(n.x + bw / 2.0, n.y + bw / 2.0, (n.w - bw).max(0.0), (n.h - bw).max(0.0), radius);
         let mut p = Paint::default();
-        p.set_color_rgba8(bc[0], bc[1], bc[2], bc[3]);
+        p.set_color_rgba8(bc[0], bc[1], bc[2], (bc[3] as f32 * opacity) as u8);
         p.anti_alias = true;
         let stroke = Stroke { width: bw, ..Stroke::default() };
         pixmap.stroke_path(&path, &p, &stroke, Transform::identity(), None);
@@ -302,12 +322,150 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
         draw_text(pixmap, n, fonts);
     }
 
-    for c in &n.children {
+    // z-index 稳定排序（负值在下、正值在上，同值保持 DOM 序）
+    let mut ordered: Vec<&PaintNode> = n.children.iter().collect();
+    ordered.sort_by_key(|c| {
+        c.decls
+            .get("z-index")
+            .and_then(|v| v.trim().parse::<i32>().ok())
+            .unwrap_or(0)
+    });
+    for c in ordered {
         draw_node(pixmap, c, fonts);
     }
 }
 
+/// box-shadow 解析与绘制：多重 "x y blur spread color [inset]"
+fn draw_box_shadows(pixmap: &mut Pixmap, n: &PaintNode, decl: &str, radius: f32) {
+    for part in split_commas(decl) {
+        let mut nums: Vec<f32> = Vec::new();
+        let mut color: Option<[u8; 4]> = None;
+        let mut inset = false;
+        for tok in part.split_whitespace() {
+            if tok == "inset" {
+                inset = true;
+                continue;
+            }
+            if let Some(c) = parse_color(tok) {
+                color = Some(c);
+                continue;
+            }
+            if let Ok(v) = tok.trim_end_matches("px").parse::<f32>() {
+                nums.push(v);
+            }
+        }
+        if nums.len() < 2 {
+            continue;
+        }
+        let (dx, dy) = (nums[0], nums[1]);
+        let blur = nums.get(2).copied().unwrap_or(0.0);
+        let spread = nums.get(3).copied().unwrap_or(0.0);
+        let Some(c) = color else { continue };
+        let mut p = Paint::default();
+        p.anti_alias = true;
+        if inset {
+            // inset：内部描边近似（沿内边界 stroke 两圈，alpha 递减）
+            let bw = (blur.max(1.0) * 0.6 + spread).max(1.0);
+            for (i, a) in [0.35f32, 0.2].iter().enumerate() {
+                let off = bw * (i as f32 + 1.0) / 3.0;
+                let path = rounded_rect_path(
+                    n.x + off,
+                    n.y + off,
+                    (n.w - off * 2.0).max(0.0),
+                    (n.h - off * 2.0).max(0.0),
+                    (radius - off).max(0.0),
+                );
+                p.set_color_rgba8(c[0], c[1], c[2], (c[3] as f32 * a) as u8);
+                let stroke = Stroke { width: bw / 2.0, ..Stroke::default() };
+                pixmap.stroke_path(&path, &p, &stroke, Transform::identity(), None);
+            }
+        } else {
+            // 外阴影：偏移+扩散矩形，blur 用多层近似
+            let layers = if blur > 0.5 { 3 } else { 1 };
+            for i in 0..layers {
+                let k = i as f32 / layers as f32;
+                let pad = spread + blur * (1.0 - k) * 0.5;
+                let path = rounded_rect_path(
+                    n.x + dx - pad,
+                    n.y + dy - pad,
+                    n.w + pad * 2.0,
+                    n.h + pad * 2.0,
+                    radius + pad,
+                );
+                let a = 1.0 - k * 0.6;
+                p.set_color_rgba8(c[0], c[1], c[2], (c[3] as f32 * a * 0.35) as u8);
+                pixmap.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
+            }
+        }
+    }
+}
+
+
+/// src-over 像素混合（cosmic-text 回调颜色 → tiny-skia 像素）
+fn blend_px(dst: &mut tiny_skia::ColorU8, col: cosmic_text::Color) {
+    let a = col.a() as u32;
+    if a == 0 {
+        return;
+    }
+    let (dr, dg, db, da) = (dst.red() as u32, dst.green() as u32, dst.blue() as u32, dst.alpha() as u32);
+    let out_a = a + da * (255 - a) / 255;
+    if out_a == 0 {
+        dst.set_rgba(0, 0, 0, 0);
+        return;
+    }
+    let mix = |fg: u32, bg: u32| ((fg * a + bg * da * (255 - a) / 255) / out_a) as u8;
+    dst.set_rgba(mix(col.r(), dr), mix(col.g(), dg), mix(col.b(), db), out_a as u8);
+}
+
 fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEngine) {
+    // text-shadow（取第一重）：先画一层偏移阴影，再画正文
+    if let Some(ts) = n.decls.get("text-shadow").cloned() {
+        let mut nums: Vec<f32> = Vec::new();
+        let mut color: Option<[u8; 4]> = None;
+        for tok in split_commas(&ts).first().map(String::as_str).unwrap_or("").split_whitespace() {
+            if let Some(c) = parse_color(tok) {
+                color = Some(c);
+                continue;
+            }
+            if let Ok(v) = tok.trim_end_matches("px").parse::<f32>() {
+                nums.push(v);
+            }
+        }
+        if let Some(c) = color {
+            let dx = nums.first().copied().unwrap_or(0.0);
+            let dy = nums.get(1).copied().unwrap_or(0.0);
+            let mut sn = n.clone();
+            sn.x += dx;
+            sn.y += dy;
+            let sc = cosmic_text_color(c);
+            let buffer_s = super::text::layout_buffer(
+                fonts,
+                &sn.text,
+                font_size_of(&sn),
+                weight_of(&sn),
+                c,
+                Some(sn.w),
+                line_height_of(&sn),
+                sn.text_align,
+                sn.decls.get("font-family").and_then(|v| {
+                    v.split(',').map(|s2| s2.trim().trim_matches(['"', '\''])).find(|s2| {
+                        !s2.is_empty() && !matches!(*s2, "sans-serif" | "serif" | "monospace" | "system-ui")
+                    })
+                }),
+            );
+            let bx = sn.x.round() as i32;
+            let by = sn.y.round() as i32;
+            buffer_s.draw(&mut fonts.font_system, &mut fonts.swash, sc, |gx, gy, gw, gh, col| {
+                for yy in 0..gh {
+                    for xx in 0..gw {
+                        if let Some(px) = pixmap.pixel_mut((bx + gx + xx) as u32, (by + gy + yy) as u32) {
+                            blend_px(px, col);
+                        }
+                    }
+                }
+            });
+        }
+    }
     let buffer = super::text::layout_buffer(
         fonts,
         &n.text,
