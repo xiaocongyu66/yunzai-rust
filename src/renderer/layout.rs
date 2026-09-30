@@ -46,6 +46,14 @@ pub fn dim(v: &str, basis: f32) -> Dimension {
     if v == "auto" || v.is_empty() {
         return Dimension::Auto;
     }
+    // calc(百分比 ± 像素)：解析百分比主体与像素偏移
+    if v.starts_with("calc(") && v.ends_with(')') {
+        if let Some((pct, px)) = parse_calc_pct_px(&v[5..v.len() - 1]) {
+            let base = basis * pct;
+            return length(base + px);
+        }
+        return Dimension::Auto;
+    }
     if let Some(p) = v.strip_suffix('%') {
         return p.trim().parse::<f32>().map(|n| Dimension::Percent(n / 100.0)).unwrap_or(Dimension::Auto);
     }
@@ -54,6 +62,30 @@ pub fn dim(v: &str, basis: f32) -> Dimension {
         return length(f);
     }
     Dimension::Auto
+}
+
+/// calc 表达式 → (百分比 0..1, 像素偏移)。支持 "100% - 400px" / "50% + 20px" 等二元形态
+fn parse_calc_pct_px(expr: &str) -> Option<(f32, f32)> {
+    let mut pct = 0.0f32;
+    let mut px = 0.0f32;
+    let mut matched = false;
+    for tok in expr.split_whitespace() {
+        let (neg, t) = match tok {
+            "-" => continue,
+            "+" => continue,
+            t if t.starts_with('-') => (true, &t[1..]),
+            t => (false, t),
+        };
+        if let Some(p) = t.strip_suffix('%') {
+            let v = p.parse::<f32>().ok()? / 100.0;
+            pct = if neg { -v } else { v };
+            matched = true;
+        } else if let Some(v) = t.trim_end_matches("px").parse::<f32>().ok() {
+            px += if neg { -v } else { v };
+            matched = true;
+        }
+    }
+    matched.then_some((pct, px))
 }
 
 fn lpa(v: &str, basis: f32) -> LengthPercentageAuto {
