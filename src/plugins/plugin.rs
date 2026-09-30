@@ -117,7 +117,15 @@ pub struct E {
 }
 
 impl E {
-    pub fn new(bot: Arc<Bot>, data: Value) -> E {
+    pub fn new(bot: Arc<Bot>, mut data: Value) -> E {
+        // isGroup/isPrivate 由 group_id 推导（上下文重建时数据可能不带这两个字段）
+        if let Some(obj) = data.as_object_mut() {
+            let has_g = obj.get("group_id").map(|v| !v.is_null()).unwrap_or(false);
+            obj.entry("isGroup".to_string())
+                .or_insert_with(|| json!(has_g));
+            obj.entry("isPrivate".to_string())
+                .or_insert_with(|| json!(!has_g));
+        }
         E { bot, data }
     }
 

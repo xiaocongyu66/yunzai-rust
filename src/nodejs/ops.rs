@@ -370,10 +370,13 @@ pub async fn op_async(name: &str, args: J) -> J {
         "e_reply" => {
             // 无状态：直接用事件参数构造上下文（bot 从全局注册表取，与 recall 同模式）
             let bot = GLOBAL_BOT.get().cloned();
+            let gid = args.get("group_id").cloned().unwrap_or(J::Null);
             let ctx = json!({
                 "self_id": s("self_id"),
-                "group_id": args.get("group_id").cloned().unwrap_or(J::Null),
+                "group_id": gid,
                 "user_id": args.get("user_id").cloned().unwrap_or(J::Null),
+                "isGroup": !args.get("group_id").map(J::is_null).unwrap_or(true),
+                "isPrivate": args.get("group_id").map(J::is_null).unwrap_or(true),
             });
             crate::util::make_log1(
                 crate::logger::Level::Debug,
