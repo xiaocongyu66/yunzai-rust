@@ -356,11 +356,23 @@ async function instantiate(regKey, eJson) {
   return JSON.stringify({ rules })
 }
 
+// 把 e.reply 等事件回调绑定到当前调用的 regKey（缓存复用的 e 可能来自其他插件首次创建）
+function rebindE(e, regKey) {
+  e.reply = async (msg, quote, data) => op('e_reply', { key: regKey, msg: JSON.stringify(msg), quote: !!quote, data: data ? JSON.stringify(data) : '' })
+  e.recall = async () => op('recall', { self_id: e.self_id, message_id: e.message_id, group_id: e.group_id ?? null, user_id: e.user_id ?? null })
+  e.setContext = (type, isGroup, time = 120, timeout = '操作超时已取消') =>
+    op('ctx_set', { key: regKey, plugin: e._plugin ?? '', type, isGroup: !!isGroup, time, timeout, e: JSON.stringify(e) })
+  e.getContext = (type, isGroup) => op('ctx_get', { key: regKey, plugin: e._plugin ?? '', type, isGroup: !!isGroup })
+  e.finishContext = (type, isGroup) => op('ctx_finish', { key: regKey, plugin: e._plugin ?? '', type, isGroup: !!isGroup })
+  e.finish = async (type, isGroup) => { await e.finishContext(type, isGroup) }
+}
+
 async function callMethod(regKey, fnc, eJson) {
   const entry = registry.get(regKey)
   if (!entry) return 'null'
   try {
     const e = buildE(regKey, eJson)
+    rebindE(e, regKey)
     const inst = entry.inst ?? new entry.cls()
     inst.e = e
     const ret = await inst[fnc](e)
@@ -378,6 +390,7 @@ async function accept(regKey, eJson) {
   if (!entry) return 'null'
   try {
     const e = buildE(regKey, eJson)
+    rebindE(e, regKey)
     const inst = new entry.cls()
     inst.e = e
     if (typeof inst.accept !== 'function') return 'null'

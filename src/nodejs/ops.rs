@@ -20,9 +20,14 @@ impl EventGuard {
         }
     }
     pub fn clear(key: &str) {
-        if let Ok(mut map) = CURRENT_EVENTS.lock() {
-            map.remove(key);
-        }
+        // 延迟清理：插件内部的异步回复（如渲染后 send）可能在调用返回后才触达
+        let k = key.to_string();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            if let Ok(mut map) = CURRENT_EVENTS.lock() {
+                map.remove(&k);
+            }
+        });
     }
     pub fn get(key: &str) -> Option<(ArcBot, J)> {
         CURRENT_EVENTS.lock().ok().and_then(|m| m.get(key).cloned())
