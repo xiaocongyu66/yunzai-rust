@@ -368,17 +368,22 @@ pub async fn op_async(name: &str, args: J) -> J {
         "redis_ttl" => J::from(-1),
         "http" => http_op(&args).await,
         "e_reply" => {
-            let guarded = EventGuard::get(&s("key"));
+            // 无状态：直接用事件参数构造上下文（bot 从全局注册表取，与 recall 同模式）
+            let bot = GLOBAL_BOT.get().and_then(|b| b.get_bot(&s("self_id")));
+            let ctx = json!({
+                "self_id": s("self_id"),
+                "group_id": args.get("group_id").cloned().unwrap_or(J::Null),
+                "user_id": args.get("user_id").cloned().unwrap_or(J::Null),
+            });
             crate::util::make_log1(
                 crate::logger::Level::Debug,
                 Some("reply"),
-                format!("e_reply op: key={} guarded={}", s("key"), guarded.is_some()),
+                format!("e_reply op: key={} ctx={}", s("key"), ctx),
             );
-            let ret = guarded.and_then(|(bot, data)| {
-                let e = crate::plugins::plugin::E::new(bot, data);
+            let ret = bot.and_then(|bot| {
+                let e = crate::plugins::plugin::E::new(bot, ctx);
                 let msg: J = serde_json::from_str(&s("msg")).unwrap_or(J::Null);
                 let opts: J = serde_json::from_str(&s("data")).unwrap_or(json!({}));
-                // 回调线程可能无 tokio 上下文 → 回退主 runtime Handle
                 let h = tokio::runtime::Handle::try_current()
                     .ok()
                     .or_else(|| crate::GLOBAL_RT.get().cloned());
