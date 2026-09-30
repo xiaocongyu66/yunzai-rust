@@ -173,7 +173,10 @@ function buildE(key, eJson) {
       const html = art(file, data)
       const r = await op('render', { html, width: opts.scale ? Math.round(720 * opts.scale) : 720 })
       const b64 = r?.data ?? null
-      if (!b64) return null
+      if (!b64) {
+        log(3, `[render] 渲染失败: ${r?.error ?? '无输出'}`)
+        return null
+      }
       // ≈ TRSS puppeteer 语义：retType 'base64' 返回 base64；
       //   'default'/'msgId' 直接 reply 图片并返回 msgId
       if (opts.retType === 'base64') return b64
