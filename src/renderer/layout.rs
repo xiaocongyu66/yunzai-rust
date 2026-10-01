@@ -6,7 +6,7 @@ use super::style::Resolved;
 use super::text::{TextAlign, TextEngine};
 use std::collections::BTreeMap;
 use taffy::prelude::*;
-use taffy::util::Resolve;
+use taffy::util::MaybeResolve;
 
 /// 布局完成的绘制节点（绝对坐标 + 原始声明 + 结构化绘制样式）
 #[derive(Clone)]
