@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>t10 min-width calc(100% - 200px)</title>
+<style>
+  body { width: 600px; margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+  <!-- 预期：600x80 画布。块声明 width:100px 但 min-width:calc(100% - 200px)，
+       以 body 宽 600 为 basis 折算 = 400px ≥ width，最终块宽 400px 高 80px。
+       calc 折算失败时块会塌缩回 100px 宽 —— 以此判定 calc 生效。 -->
+  <!-- 采样：(399,40)紫 (401,40)白 (50,40)紫 (100,40)紫 -->
+  <div style="width: 100px; min-width: calc(100% - 200px); height: 80px; background-color: #8e44ad;"></div>
+</body>
+</html>

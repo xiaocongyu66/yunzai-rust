@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>t03 180deg 线性渐变红到蓝</title>
+<style>
+  body { width: 600px; margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+  <!-- 预期：整幅 600x150 为 180deg（自上而下）红→蓝线性渐变，无横向条纹 -->
+  <!-- 采样：x=300 列自上而下 (251,0,4) → 中部紫 (127,0,128) → (3,0,252)；
+       同一水平行内颜色一致 -->
+  <div style="width: 600px; height: 150px; background: linear-gradient(180deg, #ff0000, #0000ff);"></div>
+</body>
+</html>

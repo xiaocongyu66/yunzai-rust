@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>t06 text-shadow 文字阴影偏移</title>
+<style>
+  body { width: 600px; margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+  <!-- 预期：600x80 画布（外层容器定高 80，内层 40px 文本按测量值落位，文字区约 y 0..60）。
+       蓝色文字 "Shadow 40px"（#3498db），阴影色深灰蓝 #2c3e50 相对正文偏移 (2px,2px)：
+       每个字形出现两组同形像素，阴影组在正文组右下方 2px，
+       字形右/下边缘外露出深色轮廓，文字区以下（y>60）保持纯白。 -->
+  <!-- 人工 PIL 验证：在文字区找任一深色阴影像素 (x,y)，其左上 (x-2,y-2) 附近应为蓝色正文像素；
+       y>60 区域不应出现任何非白像素 -->
+  <div style="width: 600px; height: 80px; background-color: #ffffff;">
+    <div style="font-size: 40px; color: #3498db; text-shadow: 2px 2px #2c3e50;">Shadow 40px</div>
+  </div>
+</body>
+</html>

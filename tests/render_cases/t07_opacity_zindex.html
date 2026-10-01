@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>t07 z-index 排序与 opacity 混合</title>
+<style>
+  body { width: 600px; margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+  <!-- 预期：600x200 画布。DOM 顺序 B 在前 A 在后，但 z-index 2 > 1 强制 B（红，opacity 0.5）在最上层。
+       A 纯蓝 200x120 覆盖 (0,0)-(200,120)；B 半透明红 120x200 覆盖 (80,0)-(200,200)。
+       重叠区 (80..200, 0..120) = 50% 红叠蓝 ≈ (128,0,128) 紫；
+       A 独占区 (0..80, 0..120) = 纯蓝 (0,0,255)；
+       B 独占区 (80..200, 120..200) = 50% 红叠白 ≈ (255,128,128) 粉。
+       若 z-index 失效（按 DOM 序后画 A），重叠区会变成不透明蓝 (0,0,255) —— 以此判定 z-index 生效。 -->
+  <!-- 采样：(30,60)蓝 (140,60)紫 (140,160)粉 -->
+  <div style="position: relative; width: 600px; height: 200px; background-color: #ffffff;">
+    <div style="position: absolute; left: 80px; top: 0; width: 120px; height: 200px; background-color: #ff0000; opacity: 0.5; z-index: 2;"></div>
+    <div style="position: absolute; left: 0; top: 0; width: 200px; height: 120px; background-color: #0000ff; z-index: 1;"></div>
+  </div>
+</body>
+</html>

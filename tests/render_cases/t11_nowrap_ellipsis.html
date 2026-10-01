@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>t11 nowrap + ellipsis + overflow hidden 截断</title>
+<style>
+  body { width: 600px; margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+  <!-- 预期：外层 200x40 浅灰容器定尺寸 overflow:hidden；内层长文本不允许换行，
+       超出部分裁剪并显示省略号。
+       核心几何断言（目标行为）：画布高 40，容器矩形 (0,0)-(200,40) 之外没有任何文字像素，
+       容器右缘 x=200 右侧、下缘 y=40 以下均为纯白。 -->
+  <!-- 基线注记：white-space:nowrap 与 text-overflow:ellipsis 目前为 canary（引擎尚未消费），
+       overflow 裁剪依赖绘制层 62598a9+。基线版本下内层文本按测量尺寸（约 3 行 60px）溢出画到 y>40，
+       人工核对时以「画布 40 高、容器外无文字」为目标预期，先记录版本差异。 -->
+  <div style="width: 200px; height: 40px; background-color: #ecf0f1; overflow: hidden;">
+    <div style="white-space: nowrap; text-overflow: ellipsis; font-size: 16px; line-height: 20px;">The quick brown fox jumps over the lazy dog again and again forever</div>
+  </div>
+</body>
+</html>

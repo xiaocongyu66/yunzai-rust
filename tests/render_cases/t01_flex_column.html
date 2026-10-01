@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>t01 flex column 三色块纵向排列</title>
+<style>
+  body { width: 600px; margin: 0; padding: 0; display: flex; flex-direction: column; }
+</style>
+</head>
+<body>
+  <!-- 预期：600x300 画布，三条 600x100 横带自上而下 红/绿/蓝，无缝隙 -->
+  <!-- 采样：(300,50)≈(231,76,60) (300,150)≈(39,174,96) (300,250)≈(41,128,185) -->
+  <div style="width: 600px; height: 100px; background-color: #e74c3c;"></div>
+  <div style="width: 600px; height: 100px; background-color: #27ae60;"></div>
+  <div style="width: 600px; height: 100px; background-color: #2980b9;"></div>
+</body>
+</html>

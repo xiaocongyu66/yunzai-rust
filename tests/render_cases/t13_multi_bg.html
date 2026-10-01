@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>t13 多重背景两层渐变叠加</title>
+<style>
+  body { width: 600px; margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+  <!-- 预期：600x150 画布，两层背景：
+       第 1 层（上层）= 水平 60% 半透明蓝；第 2 层（下层）= 水平 红→黄。
+       分层绘制（目标行为 62598a9+）：左端 ≈ 0.6 蓝叠红 ≈ (102,0,153) 紫，
+       右端 ≈ 0.6 蓝叠黄 ≈ (102,102,153) 灰蓝，两层数据同时可见。
+       基线版本（合并为单渐变）：色标按序均布，水平方向出现 蓝→红→黄 的多段过渡。
+       两种实现的共同断言：同一水平行内颜色随 x 变化（存在 ≥3 种不同色相），
+       且左端含蓝分量 —— 证明两层都被消费而不是只剩一层。 -->
+  <!-- 采样：y=75 行 x=30 / 300 / 570 三点，颜色应两两不同 -->
+  <div style="width: 600px; height: 150px; background: linear-gradient(90deg, rgba(0,0,255,0.6), rgba(0,0,255,0.6)), linear-gradient(90deg, #ff0000, #ffff00);"></div>
+</body>
+</html>

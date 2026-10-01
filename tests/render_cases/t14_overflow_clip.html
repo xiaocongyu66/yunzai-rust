@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>t14 overflow:hidden 裁剪越界子块</title>
+<style>
+  body { width: 600px; margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+  <!-- 预期：600x200 画布。浅灰容器 (0,0)-(300,200) overflow:hidden；
+       红色子块 200x200 绝对定位在 (200,100)，向右、向下各越界 100px。
+       目标行为（裁剪 62598a9+）：红色仅出现在容器内的 (200..300, 100..200) 100x100 区域，
+       x>300 或 y>200 的越界部分被裁掉显示为白。 -->
+  <!-- 采样：(250,150)红 (350,150)白(越界被裁) (150,50)灰 (150,150)灰 (250,50)灰 -->
+  <!-- 基线注记：仅含模块A/B 的版本不做绘制裁剪，红块会完整画到 (400,300)，(350,150) 为红 —— 版本差异先记录 -->
+  <div style="position: relative; width: 300px; height: 200px; background-color: #ecf0f1; overflow: hidden;">
+    <div style="position: absolute; left: 200px; top: 100px; width: 200px; height: 200px; background-color: #e74c3c;"></div>
+  </div>
+</body>
+</html>

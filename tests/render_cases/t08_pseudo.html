@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>t08 ::before / ::after 伪元素注入位置</title>
+<style>
+  body { width: 600px; margin: 0; padding: 0; }
+  #p::before { content: "B"; background-color: #e74c3c; }
+  #p::after  { content: "A"; background-color: #2980b9; }
+</style>
+</head>
+<body>
+  <!-- 预期：#p 纵向容器（200x160，浅灰）内自上而下依次为：
+       ::before 字母 B（红底小块，文本测量尺寸，约 24px 高）→ 绿 200x50 条 → 黄 200x50 条 →
+       ::after 字母 A（蓝底小块）。
+       注入位置断言（核心）：B 位于绿条之上（首子节点注入），A 位于黄条之下（尾子节点追加）。 -->
+  <!-- 采样：(100,50)绿 (100,100)黄 (150,20)灰(红块宽度=文本测量宽，右半无红)；
+       B 暗色字形像素应出现在 y 0..30、x 0..30 范围内；A 暗色字形像素应出现在 y 120..160、x 0..30 范围内。
+       注：伪元素小块尺寸=文本测量值（引擎对文本叶以测量尺寸定尺寸），宽高随字体度量浮动，
+       断言以注入位置（B 在绿上、A 在黄下）为准。 -->
+  <div id="p" style="width: 200px; height: 160px; background-color: #eeeeee; display: flex; flex-direction: column;">
+    <div style="width: 200px; height: 50px; background-color: #27ae60;"></div>
+    <div style="width: 200px; height: 50px; background-color: #f1c40f;"></div>
+  </div>
+</body>
+</html>

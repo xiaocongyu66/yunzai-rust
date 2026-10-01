@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>t02 absolute 四向 inset 定位</title>
+<style>
+  body { width: 600px; margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+  <!-- 预期：灰容器 200x200 在左上角；红块受 top:10 left:10 right:20 bottom:30 约束，
+       实际矩形 (10,10)-(180,170)，即 170x140 -->
+  <!-- 采样：(100,5)灰 (190,100)灰 (100,185)灰 (5,100)灰 (100,100)红 (179,169)红 (181,171)灰 -->
+  <div style="position: relative; width: 200px; height: 200px; background-color: #cccccc;">
+    <div style="position: absolute; top: 10px; left: 10px; right: 20px; bottom: 30px; background-color: #e74c3c;"></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>t04 四侧不同颜色 6px 边框</title>
+<style>
+  body { width: 600px; margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+  <!-- 预期：200x100 白底块，6px 边框按 CSS 四值语义 上红/右蓝/下绿/左黄，内容区 188x88 -->
+  <!-- 采样：(100,3)红 (197,50)蓝 (100,97)绿 (3,50)黄 (100,50)白 -->
+  <!-- 基线注记：四侧独立着色需绘制层支持 border-width/color 四值展开（paint 层 62598a9+）；
+       仅含模块A/B 的版本退化为整体单色边框，可先人工核对边框宽度 6px 不变 -->
+  <div style="width: 200px; height: 100px; background-color: #ffffff; border-width: 6px; border-style: solid; border-color: #e74c3c #2980b9 #27ae60 #f1c40f;"></div>
+</body>
+</html>

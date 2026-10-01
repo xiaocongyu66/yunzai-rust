@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>t05 box-shadow 外阴影与 inset 阴影</title>
+<style>
+  body { width: 600px; margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+  <!-- 预期：白底画布 600x200。
+       左块 A 120x80 蓝，位于 (40,40)-(160,120)；外阴影偏移 (10,10) 无模糊同尺寸，
+       即矩形 (50,50)-(170,130) 呈现约 35% 黑（白底上 ≈ rgb 166 灰），
+       可见区域为 A 右侧 10px 竖带（x 160..170）与下侧 10px 横带（y 120..130）。
+       右块 B 120x80 红，位于 (320,40)-(440,120)；inset 阴影 spread 8px，
+       即沿 B 内边缘约 8px 带状加深（中心区域保持纯红）。 -->
+  <!-- 采样：A(100,80)蓝 A外阴影(165,100)灰 B(380,80)红 B边缘(324,80)暗红 -->
+  <div style="position: relative; width: 600px; height: 200px; background-color: #ffffff;">
+    <div style="position: absolute; left: 40px; top: 40px; width: 120px; height: 80px; background-color: #2980b9; box-shadow: 10px 10px 0 0 #000000;"></div>
+    <div style="position: absolute; left: 320px; top: 40px; width: 120px; height: 80px; background-color: #c0392b; box-shadow: inset 0 0 0 8px #000000;"></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>t09 transform rotate+scale+translate 复合</title>
+<style>
+  body { width: 600px; margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+  <!-- 预期：600x260 画布。红块原位 (100,50)-(300,150)，中心 c=(200,100)。
+       transform: rotate(15deg) scale(1.2) translate(30px,10px)，transform-origin 默认中心。
+       变换后四角约：(131,32) (363,94) (332,210) (100,148)；中心移至约 (232,121)（右移 32 下移 21）。
+       形状顺时针倾斜 15° 且放大 1.2 倍。 -->
+  <!-- 采样：(200,100)红（变换后中心附近仍覆盖）；
+       (110,60)白（原左上角内侧，变换后已让出）；
+       (320,190)红（原框外右下，rotate+scale 后新增覆盖区）。
+       后两点一空一实即可证明变换方向与幅度正确。 -->
+  <div style="position: relative; width: 600px; height: 260px; background-color: #ffffff;">
+    <div style="position: absolute; left: 100px; top: 50px; width: 200px; height: 100px; background-color: #e74c3c; transform: rotate(15deg) scale(1.2) translate(30px, 10px);"></div>
+  </div>
+</body>
+</html>
