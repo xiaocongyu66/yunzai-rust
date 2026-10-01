@@ -2,11 +2,12 @@
 
 use super::css::split_commas;
 use super::dom::StyleNode;
+use super::style::Resolved;
 use super::text::{TextAlign, TextEngine};
 use std::collections::BTreeMap;
 use taffy::prelude::*;
 
-/// 布局完成的绘制节点（绝对坐标 + 原始声明）
+/// 布局完成的绘制节点（绝对坐标 + 原始声明 + 结构化绘制样式）
 #[derive(Clone)]
 pub struct PaintNode {
     pub x: f32,
@@ -22,6 +23,9 @@ pub struct PaintNode {
     /// letter-spacing（px）：绘制回调逐 glyph 加累计 x 偏移 i * letter_spacing
     /// （见 text::draw_with_letter_spacing）
     pub letter_spacing: f32,
+    /// 结构化绘制样式（style::Resolved，背景/阴影/边框/圆角/变换/字体文本）：
+    /// paint 层直接消费，不再解析 decls 字符串
+    pub style: Resolved,
 }
 
 /// taffy 节点上下文（所有节点）：样式声明 + 文本信息
@@ -41,6 +45,8 @@ pub struct NodeCtx {
     pub letter_spacing: f32,
     /// ellipsis 截断的定宽约束（measure 间传递：min-content 等无定宽 pass 复用）
     pub ellip_w: Option<f32>,
+    /// 结构化绘制样式（style::resolve 产出，回填到 PaintNode.style）
+    pub resolved: Resolved,
 }
 
 pub struct Tree {
@@ -115,8 +121,9 @@ fn lp(v: &str, basis: f32) -> LengthPercentage {
     }
 }
 
-fn style_of(n: &StyleNode, width: f32) -> Style {
-    // 全量映射走 style::resolve（Lightning CSS 结构化），此处只补充 taffy 特有字段
+fn style_of(n: &StyleNode, width: f32) -> (Style, Resolved) {
+    // 全量映射走 style::resolve（Lightning CSS 结构化），此处只补充 taffy 特有字段；
+    // Resolved 原样透出（paint 层消费其绘制字段）
     let d = |k: &str| n.decl(k).map(String::from);
     let r = super::style::resolve(n, width);
     let display_decl = d("display");
@@ -209,7 +216,7 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
     } else if block_flow {
         style.flex_direction = FlexDirection::Column;
     }
-    style
+    (style, r)
 }
 
 fn text_info(
@@ -276,7 +283,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
         parent_align: TextAlign,
         base_dir: &str,
     ) -> Result<taffy::NodeId, String> {
-        let st = style_of(n, width);
+        let (st, rslv) = style_of(n, width);
         let (font_size, weight, color, lh, align, family) = text_info(n, parent_font, parent_align);
         // white-space / text-overflow / letter-spacing（decls 透传，测量与绘制共用判定）
         let nowrap = super::text::white_space_nowrap(&n.decls);
@@ -294,6 +301,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
             tag: n.tag.clone(),
             letter_spacing: super::text::letter_spacing_px(&n.decls),
             ellip_w: None,
+            resolved: rslv,
         };
 
         // 文本叶子：无子节点但有文本（尺寸由 compute_layout_with_measure 按约束宽度动态换行）
@@ -480,12 +488,14 @@ fn collect(
         tag: String::new(),
         letter_spacing: 0.0,
         ellip_w: None,
+        resolved: Resolved::default(),
     });
     let mut children = Vec::new();
     let kids = taffy.children(id).map_err(|e| e.to_string())?;
     for c in kids {
         children.push(collect(taffy, c, x, y, fonts)?);
     }
+    let resolved = ctx.resolved.clone();
     let mut node = PaintNode {
         x,
         y,
@@ -498,6 +508,7 @@ fn collect(
         src: ctx.src,
         tag: ctx.tag,
         letter_spacing: ctx.letter_spacing,
+        style: resolved,
     };
 
     // 计算值归一化：绘制层从 decls 重新解析 font-size/line-height（仅认 px），
