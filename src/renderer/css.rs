@@ -6,7 +6,7 @@
 use super::dom::{CssRule, SelectorPart, StyleNode};
 use std::collections::BTreeMap;
 
-/// 解析样式表：Lightning CSS 结构化遍历（Style 规则 + @font-face）
+/// 解析样式表：Lightning CSS 结构化遍历（Style 规则 + @font-face + @media 展开 + @import 递归）
 pub fn parse_stylesheet(css: &str) -> Vec<CssRule> {
     parse_stylesheet_lc(css).0
 }
@@ -38,81 +38,158 @@ fn split_pseudo(sel: &str) -> (String, Option<&'static str>) {
     (s.to_string(), None)
 }
 
+/// @import 递归深度上限（防循环引用）
+const MAX_IMPORT_DEPTH: u32 = 5;
+
+/// 样式表收集器：样式规则 / @font-face / 伪元素
+#[derive(Default)]
+struct SheetCollector {
+    rules: Vec<CssRule>,
+    faces: Vec<(String, String)>,
+    pseudos: Vec<PseudoRule>,
+}
+
 /// 返回 (样式规则, @font-face 列表, 伪元素规则列表)
 pub fn parse_stylesheet_lc(css: &str) -> (Vec<CssRule>, Vec<(String, String)>, Vec<PseudoRule>) {
-    use lightningcss::rules::font_face::{FontFaceProperty, Source};
+    use lightningcss::stylesheet::{ParserOptions, StyleSheet};
+    let mut ctx = SheetCollector::default();
+    if let Ok(ss) = StyleSheet::parse(css, ParserOptions::default()) {
+        collect_rules(&ss.rules, &mut ctx, 0);
+    }
+    (ctx.rules, ctx.faces, ctx.pseudos)
+}
+
+/// 递归收集规则：Style/FontFace 展开；块容器规则（@media/@supports/@layer/@container/
+/// @scope/@starting-style/@-moz-document）展开内层 rules（条件一律忽略，模板为静态宽度）；
+/// @import 读本地文件后整体解析并递归（depth 上限防循环）
+fn collect_rules(list: &lightningcss::rules::CssRuleList, ctx: &mut SheetCollector, depth: u32) {
     use lightningcss::rules::CssRule as LcRule;
-    use lightningcss::traits::ToCss;
-    let mut out = Vec::new();
-    let mut faces: Vec<(String, String)> = Vec::new();
-    let mut pseudos: Vec<PseudoRule> = Vec::new();
-    let Ok(ss) = lightningcss::stylesheet::StyleSheet::parse(css, lightningcss::stylesheet::ParserOptions::default()) else {
-        return (out, faces, pseudos);
-    };
-    for rule in ss.rules.0.iter() {
+    use lightningcss::stylesheet::{ParserOptions, StyleSheet};
+    for rule in list.0.iter() {
         match rule {
-            LcRule::Style(st) => {
-                let mut decls: Vec<(String, String)> = Vec::new();
-                for d in st.declarations.declarations.iter() {
-                    serialize_decl(d, &mut decls);
-                }
-                let sel_str = st.selectors.to_css_string(lc_opts()).unwrap_or_default();
-                for one in sel_str.split(',') {
-                    let one = one.trim();
-                    if one.is_empty() {
-                        continue;
-                    }
-                    let (body, which) = split_pseudo(one);
-                    // 伪类（:hover/:nth-child 等）暂不支持，跳过
-                    if which.is_none() && body.contains(':') {
-                        continue;
-                    }
-                    if let Some(w) = which {
-                        let (parts, _) = compile_selector(&body);
-                        pseudos.push(PseudoRule {
-                            parent: parts,
-                            which: match w {
-                                "before" => "before",
-                                _ => "after",
-                            },
-                            decls: decls.iter().cloned().collect(),
-                        });
-                        continue;
-                    }
-                    let (parts, spec) = compile_selector(&body);
-                    out.push(CssRule { selector: parts, decls: decls.iter().cloned().collect(), specificity: spec });
-                }
-            }
-            LcRule::FontFace(ff) => {
-                let mut fam = String::new();
-                let mut src = String::new();
-                for prop in ff.properties.iter() {
-                    match prop {
-                        FontFaceProperty::FontFamily(f) => {
-                            if let lightningcss::properties::font::FontFamily::FamilyName(n) = f {
-                                if let Ok(v) = n.to_css_string(lc_opts()) {
-                                    fam = v.trim_matches(|c| c == '"' || c == '\'').to_string();
-                                }
-                            }
+            LcRule::Style(st) => collect_style(st, ctx),
+            LcRule::FontFace(ff) => collect_font_face(ff, ctx),
+            LcRule::Media(m) => collect_rules(&m.rules, ctx, depth),
+            LcRule::Supports(s) => collect_rules(&s.rules, ctx, depth),
+            LcRule::LayerBlock(l) => collect_rules(&l.rules, ctx, depth),
+            LcRule::Container(c) => collect_rules(&c.rules, ctx, depth),
+            LcRule::Scope(s) => collect_rules(&s.rules, ctx, depth),
+            LcRule::StartingStyle(s) => collect_rules(&s.rules, ctx, depth),
+            LcRule::MozDocument(d) => collect_rules(&d.rules, ctx, depth),
+            LcRule::Import(i) => {
+                if depth < MAX_IMPORT_DEPTH {
+                    if let Some(css) = read_import_source(&i.url.to_string()) {
+                        if let Ok(ss) = StyleSheet::parse(&css, ParserOptions::default()) {
+                            collect_rules(&ss.rules, ctx, depth + 1);
                         }
-                        FontFaceProperty::Source(list) => {
-                            for sv in list {
-                                if let Source::Url(u) = sv {
-                                    src = u.url.url.to_string();
-                                }
-                            }
-                        }
-                        _ => {}
                     }
-                }
-                if !fam.is_empty() && !src.is_empty() {
-                    faces.push((fam, src));
                 }
             }
             _ => {}
         }
     }
-    (out, faces, pseudos)
+}
+
+/// @import url → 本地 CSS 文本（http(s)/data: 不支持；相对路径基于 BASE_DIR 解析）
+fn read_import_source(url: &str) -> Option<String> {
+    let base = crate::renderer::BASE_DIR
+        .get()
+        .cloned()
+        .unwrap_or_else(|| ".".to_string());
+    let path = super::media::resolve(url, &base);
+    if path.starts_with("http://") || path.starts_with("https://") || path.starts_with("data:") {
+        return None;
+    }
+    std::fs::read_to_string(&path).ok()
+}
+
+/// 样式规则展开：声明序列化 + 选择器编译（伪元素单独收集）
+fn collect_style(st: &lightningcss::rules::style::StyleRule, ctx: &mut SheetCollector) {
+    use lightningcss::traits::ToCss;
+    let mut decls: Vec<(String, String)> = Vec::new();
+    for d in st.declarations.declarations.iter() {
+        serialize_decl(d, &mut decls);
+    }
+    let sel_str = st.selectors.to_css_string(lc_opts()).unwrap_or_default();
+    for one in sel_str.split(',') {
+        let one = one.trim();
+        if one.is_empty() {
+            continue;
+        }
+        let (body, which) = split_pseudo(one);
+        // 伪类（:hover/:nth-child 等）暂不支持，跳过
+        if which.is_none() && body.contains(':') {
+            continue;
+        }
+        if let Some(w) = which {
+            let (parts, _) = compile_selector(&body);
+            ctx.pseudos.push(PseudoRule {
+                parent: parts,
+                which: match w {
+                    "before" => "before",
+                    _ => "after",
+                },
+                decls: decls.iter().cloned().collect(),
+            });
+            continue;
+        }
+        let (parts, spec) = compile_selector(&body);
+        ctx.rules.push(CssRule {
+            selector: parts,
+            decls: decls.iter().cloned().collect(),
+            specificity: spec,
+        });
+    }
+}
+
+/// @font-face 展开：family 别名 + src 首个本地存在的 url
+fn collect_font_face(ff: &lightningcss::rules::font_face::FontFaceRule, ctx: &mut SheetCollector) {
+    use lightningcss::rules::font_face::{FontFaceProperty, Source};
+    use lightningcss::traits::ToCss;
+    let mut fam = String::new();
+    let mut src = String::new();
+    for prop in ff.properties.iter() {
+        match prop {
+            FontFaceProperty::FontFamily(f) => {
+                if let lightningcss::properties::font::FontFamily::FamilyName(n) = f {
+                    if let Ok(v) = n.to_css_string(lc_opts()) {
+                        fam = v.trim_matches(|c| c == '"' || c == '\'').to_string();
+                    }
+                }
+            }
+            FontFaceProperty::Source(list) => {
+                let urls: Vec<String> = list
+                    .iter()
+                    .filter_map(|sv| match sv {
+                        Source::Url(u) => Some(u.url.url.to_string()),
+                        _ => None,
+                    })
+                    .collect();
+                if let Some(pick) = pick_face_url(&urls) {
+                    src = pick;
+                }
+            }
+            _ => {}
+        }
+    }
+    if !fam.is_empty() && !src.is_empty() {
+        ctx.faces.push((fam, src));
+    }
+}
+
+/// font-face src 多候选：取第一个本地存在的文件（相对路径基于 BASE_DIR）；都不存在则取第一个
+fn pick_face_url(urls: &[String]) -> Option<String> {
+    let first = urls.first()?;
+    let base = crate::renderer::BASE_DIR
+        .get()
+        .cloned()
+        .unwrap_or_else(|| ".".to_string());
+    Some(
+        urls.iter()
+            .find(|u| std::fs::metadata(super::media::resolve(u, &base)).is_ok())
+            .unwrap_or(first)
+            .clone(),
+    )
 }
 
 /// 应用伪元素规则：命中 parent 选择器的节点，注入 ::before/::after 虚拟子节点
@@ -305,6 +382,55 @@ pub fn serialize_decl(d: &lightningcss::properties::Property, out: &mut Vec<(Str
             out.push(("row-gap".into(), lc_val(&g.row)));
             out.push(("column-gap".into(), lc_val(&g.column)));
         }
+        // box-sizing：style.rs 侧解析为 border_box（layout 侧做内容盒补偿）
+        Property::BoxSizing(b, _) => out.push(("box-sizing".into(), lc_val(b))),
+        // border 全系列：简写键保留（兼容直接读简写的消费端），同时展开各侧 longhand
+        // 保证 border-top-width 等键进入 decls（级联语义正确：简写在先、longhand 可覆盖）
+        Property::Border(b) => {
+            push_shorthand(d, &name, out);
+            for side in ["top", "right", "bottom", "left"] {
+                push_border_side(out, side, &b.width, &b.style, &b.color);
+            }
+        }
+        Property::BorderTop(b) => {
+            push_shorthand(d, &name, out);
+            push_border_side(out, "top", &b.width, &b.style, &b.color);
+        }
+        Property::BorderRight(b) => {
+            push_shorthand(d, &name, out);
+            push_border_side(out, "right", &b.width, &b.style, &b.color);
+        }
+        Property::BorderBottom(b) => {
+            push_shorthand(d, &name, out);
+            push_border_side(out, "bottom", &b.width, &b.style, &b.color);
+        }
+        Property::BorderLeft(b) => {
+            push_shorthand(d, &name, out);
+            push_border_side(out, "left", &b.width, &b.style, &b.color);
+        }
+        Property::BorderWidth(w) => {
+            push_shorthand(d, &name, out);
+            for (side, v) in [("top", &w.top), ("right", &w.right), ("bottom", &w.bottom), ("left", &w.left)] {
+                out.push((format!("border-{side}-width"), lc_val(v)));
+            }
+        }
+        Property::BorderStyle(s) => {
+            push_shorthand(d, &name, out);
+            for (side, v) in [("top", &s.top), ("right", &s.right), ("bottom", &s.bottom), ("left", &s.left)] {
+                out.push((format!("border-{side}-style"), lc_val(v)));
+            }
+        }
+        Property::BorderColor(c) => {
+            push_shorthand(d, &name, out);
+            for (side, v) in [("top", &c.top), ("right", &c.right), ("bottom", &c.bottom), ("left", &c.left)] {
+                out.push((format!("border-{side}-color"), lc_val(v)));
+            }
+        }
+        // 文本/排版相关透传（文本层按 decls 键读取）
+        Property::LetterSpacing(v) => out.push(("letter-spacing".into(), lc_val(v))),
+        Property::TextIndent(v) => out.push(("text-indent".into(), lc_val(v))),
+        Property::WhiteSpace(v) => out.push(("white-space".into(), lc_val(v))),
+        Property::VerticalAlign(v) => out.push(("vertical-align".into(), lc_val(v))),
         other => {
             // 通用：Property 序列化输出为 "name: value"，剥掉前缀只留值
             if let Ok(v) = other.to_css_string(false, lc_opts()) {
@@ -316,6 +442,30 @@ pub fn serialize_decl(d: &lightningcss::properties::Property, out: &mut Vec<(Str
             }
         }
     }
+}
+
+/// 简写键保留：通用序列化 "name: value" 剥出值（兼容直接读简写键的旧消费端）
+fn push_shorthand(d: &lightningcss::properties::Property, name: &str, out: &mut Vec<(String, String)>) {
+    if let Ok(v) = d.to_css_string(false, lc_opts()) {
+        let val = match v.split_once(':') {
+            Some((_, rest)) => rest.trim().to_string(),
+            None => v,
+        };
+        out.push((name.to_string(), val));
+    }
+}
+
+/// 单侧 border 简写展开为 border-{side}-{width,style,color} 三个 longhand
+fn push_border_side(
+    out: &mut Vec<(String, String)>,
+    side: &str,
+    width: &lightningcss::properties::border::BorderSideWidth,
+    style: &lightningcss::properties::border::LineStyle,
+    color: &lightningcss::values::color::CssColor,
+) {
+    out.push((format!("border-{side}-width"), lc_val(width)));
+    out.push((format!("border-{side}-style"), lc_val(style)));
+    out.push((format!("border-{side}-color"), lc_val(color)));
 }
 
 /// 带浏览器 targets 的序列化选项（空 targets 会让部分属性序列化失败返回空）

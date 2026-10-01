@@ -54,6 +54,7 @@ fn property_id_of(name: &str) -> Option<lightningcss::properties::PropertyId<'st
         "justify-content" => PropertyId::JustifyContent(VendorPrefix::None),
         "align-items" => PropertyId::AlignItems(VendorPrefix::None),
         "align-content" => PropertyId::AlignContent(VendorPrefix::None),
+        "box-sizing" => PropertyId::BoxSizing(VendorPrefix::None),
         _ => return None,
     })
 }
@@ -146,6 +147,8 @@ pub struct Resolved {
     pub justify_content: Option<JustifyContent>,
     pub align_items: Option<AlignItems>,
     pub align_content: Option<AlignContent>,
+    /// box-sizing: border-box（width/height 含 padding+border，layout 侧据此做内容盒补偿）
+    pub border_box: bool,
 }
 
 impl Default for Resolved {
@@ -178,6 +181,7 @@ impl Default for Resolved {
             justify_content: None,
             align_items: None,
             align_content: None,
+            border_box: false,
         }
     }
 }
@@ -312,6 +316,10 @@ fn apply(p: &Property, basis: f32, r: &mut Resolved) {
                 LC::ContentDistribution(ContentDistribution::SpaceEvenly) => Some(AlignContent::SpaceEvenly),
                 _ => None,
             };
+        }
+        P::BoxSizing(b, _) => {
+            use lightningcss::properties::size::BoxSizing as LB;
+            r.border_box = matches!(b, LB::BorderBox);
         }
         _ => {}
     }
