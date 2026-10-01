@@ -217,6 +217,14 @@ fn style_of(n: &StyleNode, width: f32) -> (Style, Resolved) {
     } else if block_flow {
         style.flex_direction = FlexDirection::Column;
     }
+    // table 容器（CSS display:table 或裸 table/thead/tbody 标签）：纵向排列行（行内 cell 横排由 table-row 的 Row 方向保证）
+    let table_container = table_decl == "table"
+        || (display_decl.is_none() && matches!(n.tag.as_str(), "table" | "thead" | "tbody" | "tfoot"));
+    if table_container {
+        style.display = Display::Flex;
+        style.flex_direction = FlexDirection::Column;
+        style.flex_grow = if style.flex_grow > 0.0 { style.flex_grow } else { 0.0 };
+    }
     (style, r)
 }
 
