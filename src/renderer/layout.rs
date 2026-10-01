@@ -330,7 +330,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
                 _ => 0.0,
             };
             w -= ppx(st.padding.left) + ppx(st.padding.right);
-            w -= ppx(st.margin.left.resolve(16.0)) + ppx(st.margin.right.resolve(16.0));
+            w -= st.margin.left.maybe_resolve(16.0).unwrap_or(0.0) + st.margin.right.maybe_resolve(16.0).unwrap_or(0.0);
             w.max(0.0)
         };
         let mut child_ids = Vec::new();
