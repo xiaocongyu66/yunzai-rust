@@ -332,14 +332,15 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
     let ident = Transform::identity();
     let draw_tx = tx.as_ref().unwrap_or(&ident);
 
-    // 背景图（Lightning CSS 已把 background 简写展开为 background-image 等长属性）
+    // 背景图层（Lightning CSS 已把 background 简写展开为 background-image 等长属性）：
+    // 多层背景逐层绘制，第一层最上；CSS 绘制顺序为背景色在所有图层之下
     if n.tag != "img" {
-        if let Some(bi) = n.decls.get("background-image") {
-            if let Some(url) = crate::renderer::media::extract_url(bi) {
-                let base = crate::renderer::BASE_DIR.get().map(String::as_str).unwrap_or(".");
-                let abs = crate::renderer::media::resolve(&url, base);
-                if let Some(img) = crate::renderer::media::load(&abs, base) {
-                    draw_bg_image(pixmap, n, &img);
+        match n.decls.get("background-image") {
+            Some(bi) => draw_background_layers(pixmap, n, bi, false, draw_tx, opacity, radius),
+            // 兜底：background 键（正常不会出现，简写已展开）；渐变已在背景色块处理，此处只画 url 图层
+            None => {
+                if let Some(bg) = n.decls.get("background") {
+                    draw_background_layers(pixmap, n, bg, true, draw_tx, opacity, radius);
                 }
             }
         }
@@ -354,9 +355,10 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
         }
     }
 
-    // 背景
-    if let Some(bg) = n.decls.get("background").or_else(|| n.decls.get("background-color")).cloned() {
-        match parse_bg(&bg) {
+    // 背景色（CSS 顺序：颜色位于全部背景图层之下；纯色取 background-color，兜底 background 键）
+    // 渐变按标准属于 background-image，此处兼容旧数据（background-color 直接写渐变）
+    if let Some(bg) = n.decls.get("background").or_else(|| n.decls.get("background-color")) {
+        match parse_bg(bg) {
             Some(Bg::Color(c)) => {
                 let path = rounded_rect_path(n.x, n.y, n.w, n.h, radius);
                 let mut p = Paint::default();
@@ -364,71 +366,15 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
                 p.anti_alias = true;
                 pixmap.fill_path(&path, &p, FillRule::Winding, *draw_tx, None);
             }
-            Some(Bg::Linear { deg, stops }) => {
-                if let Some(shader) = linear_shader(deg, &stops, n.w, n.h) {
-                    let path = rounded_rect_path(n.x, n.y, n.w, n.h, radius);
-                    let mut p = Paint::default();
-                    p.shader = shader;
-                    p.anti_alias = true;
-                    pixmap.fill_path(&path, &p, FillRule::Winding, *draw_tx, None);
-                }
+            Some(other @ (Bg::Linear { .. } | Bg::Radial { .. })) => {
+                fill_gradient(pixmap, n, &other, draw_tx, opacity, radius);
             }
-            Some(Bg::Radial { stops }) => {
-                if let (Some(fg), Some(lg)) = (stops.first(), stops.last()) {
-                    let center = Point::from_xy(n.x + n.w / 2.0, n.y + n.h / 2.0);
-                    let radius = n.w.min(n.h).max(1.0) / 2.0;
-                    if let Some(g) = RadialGradient::new(
-                        center,
-                        Point::from_xy(center.x + 1.0, center.y),
-                        radius,
-                        grad_stops(&[(0.0, fg.1), (1.0, lg.1)]),
-                        SpreadMode::Pad,
-                        Transform::identity(),
-                    ) {
-                        let path = rounded_rect_path(n.x, n.y, n.w, n.h, radius);
-                        let mut p = Paint::default();
-                        p.shader = g;
-                        p.anti_alias = true;
-                        pixmap.fill_path(&path, &p, FillRule::Winding, *draw_tx, None);
-                    }
-                }
-            }
-            Some(Bg::Image(path)) => {
-                if let Some(img) = crate::renderer::media::load(&path, crate::renderer::BASE_DIR.get().map(String::as_str).unwrap_or(".")) {
-                    draw_bg_image(pixmap, n, &img);
-                }
-            }
-            None => {}
+            _ => {}
         }
     }
 
-    // 边框
-    if let Some(bw) = n
-        .decls
-        .get("border-width")
-        .or_else(|| n.decls.get("border"))
-        .and_then(|v| split_commas(v).first().cloned())
-        .and_then(|v| v.trim().trim_end_matches("px").parse::<f32>().ok())
-        .filter(|v| *v > 0.0)
-    {
-        let bc = n
-            .decls
-            .get("border-color")
-            .or_else(|| n.decls.get("border"))
-            .and_then(|v| {
-                split_commas(v)
-                    .iter()
-                    .rev()
-                    .find_map(|p| parse_color(p))
-            })
-            .unwrap_or([0, 0, 0, 255]);
-        let path = rounded_rect_path(n.x + bw / 2.0, n.y + bw / 2.0, (n.w - bw).max(0.0), (n.h - bw).max(0.0), radius);
-        let mut p = Paint::default();
-        p.set_color_rgba8(bc[0], bc[1], bc[2], (bc[3] as f32 * opacity) as u8);
-        p.anti_alias = true;
-        let stroke = Stroke { width: bw, ..Stroke::default() };
-        pixmap.stroke_path(&path, &p, &stroke, *draw_tx, None);
-    }
+    // 边框（四侧独立：width/color 逐侧回落解析；等宽同色走圆角 stroke，否则每侧梯形）
+    draw_borders(pixmap, n, draw_tx, opacity, radius);
 
     // 文本（仅叶子画：容器的文本已作为附加叶子单独布局，这里再画会重复）
     if !n.text.is_empty() && n.children.is_empty() {
@@ -443,8 +389,41 @@ fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
             .and_then(|v| v.trim().parse::<i32>().ok())
             .unwrap_or(0)
     });
+    // overflow: hidden/clip → 整棵子树画到临时 Pixmap（尺寸=节点矩形，圆角 mask 贴回）
+    // 临时 Pixmap 上限 2048×2048（= 16MB RGBA）防内存；超限（如超宽节点）退回直接绘制
+    let clipped = ["overflow", "overflow-x", "overflow-y"].iter().any(|k| {
+        n.decls
+            .get(*k)
+            .map(|v| v.to_lowercase().split_whitespace().any(|w| w == "hidden" || w == "clip"))
+            .unwrap_or(false)
+    });
+    let (tw, th) = (n.w.ceil().max(1.0), n.h.ceil().max(1.0));
+    let fits = tw <= 2048.0 && th <= 2048.0 && tw * th <= 16.0 * 1024.0 * 1024.0 / 4.0;
+    if clipped && fits && !n.children.is_empty() {
+        if let Some(mut tmp) = Pixmap::new(tw as u32, th as u32) {
+            tmp.fill(Color::from_rgba8(0, 0, 0, 0));
+            // 画布原点 = 节点左上：子树坐标整体平移 -x/-y 后绘制
+            // （&c 模式解出 &PaintNode 再 clone，避免 &&PaintNode 上 clone 出引用）
+            for &c in &ordered {
+                let mut cc = c.clone();
+                shift_xy(&mut cc, -n.x, -n.y);
+                draw_node(&mut tmp, &cc, fonts);
+            }
+            blit_r(pixmap, &tmp, n.x, n.y, n.w, n.h, (n.x, n.y, n.w, n.h), radius);
+            return;
+        }
+    }
     for c in ordered {
         draw_node(pixmap, c, fonts);
+    }
+}
+
+/// 子树坐标平移（临时画布原点对齐）
+fn shift_xy(n: &mut PaintNode, dx: f32, dy: f32) {
+    n.x += dx;
+    n.y += dy;
+    for c in &mut n.children {
+        shift_xy(c, dx, dy);
     }
 }
 
@@ -493,8 +472,11 @@ fn draw_box_shadows(pixmap: &mut Pixmap, n: &PaintNode, decl: &str, radius: f32)
                 pixmap.stroke_path(&path, &p, &stroke, Transform::identity(), None);
             }
         } else {
-            // 外阴影：偏移+扩散矩形，blur 用多层近似
-            let layers = if blur > 0.5 { 3 } else { 1 };
+            // 外阴影：偏移+扩散矩形，blur 用 5 层近似（pad 由 blur*0.5 → blur*0.1 均匀过渡）
+            // 每层 alpha 基准 0.24（递减系数 0.5），5 层叠加总覆盖 ≈0.65，与旧 3 层 0.35 基准密度一致；
+            // 无 blur 单层保持旧基准 0.35
+            let layers = if blur > 0.5 { 5 } else { 1 };
+            let base = if layers > 1 { 0.24f32 } else { 0.35 };
             for i in 0..layers {
                 let k = i as f32 / layers as f32;
                 let pad = spread + blur * (1.0 - k) * 0.5;
@@ -505,12 +487,205 @@ fn draw_box_shadows(pixmap: &mut Pixmap, n: &PaintNode, decl: &str, radius: f32)
                     n.h + pad * 2.0,
                     radius + pad,
                 );
-                let a = 1.0 - k * 0.6;
-                p.set_color_rgba8(c[0], c[1], c[2], (c[3] as f32 * a * 0.35) as u8);
+                let a = 1.0 - k * 0.5;
+                p.set_color_rgba8(c[0], c[1], c[2], (c[3] as f32 * a * base) as u8);
                 pixmap.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
             }
         }
     }
+}
+
+
+/// 边框绘制：等宽同色走圆角矩形 stroke（保留 border-radius 外观）；
+/// 不等宽/异色走每侧梯形填充（外边=节点矩形、内边=内容矩形、四角 45° 斜切衔接）。
+/// 注意：dashed/dotted/double 等线型先按 solid 绘制（TODO: 线型分段绘制）；
+/// 不等宽梯形模式下边框形状暂不跟随 border-radius（角部为斜切直线）。
+fn draw_borders(pixmap: &mut Pixmap, n: &PaintNode, draw_tx: &Transform, opacity: f32, radius: f32) {
+    let (widths, colors) = border_sides(n);
+    let [wt, wr, wb, wl] = widths;
+    if wt <= 0.0 && wr <= 0.0 && wb <= 0.0 && wl <= 0.0 {
+        return;
+    }
+    let same_color = colors.windows(2).all(|w| w[0] == w[1]);
+    if wt == wr && wr == wb && wb == wl && same_color {
+        let bw = wt;
+        let c = mul_alpha(colors[0], opacity);
+        let path = rounded_rect_path(n.x + bw / 2.0, n.y + bw / 2.0, (n.w - bw).max(0.0), (n.h - bw).max(0.0), radius);
+        let mut p = Paint::default();
+        p.set_color_rgba8(c[0], c[1], c[2], c[3]);
+        p.anti_alias = true;
+        let stroke = Stroke { width: bw, ..Stroke::default() };
+        pixmap.stroke_path(&path, &p, &stroke, *draw_tx, None);
+        return;
+    }
+    // 单侧宽度和超过盒尺寸时按 CSS 规则等比缩小
+    let sw = if wl + wr > n.w && wl + wr > 0.0 { n.w / (wl + wr) } else { 1.0 };
+    let sh = if wt + wb > n.h && wt + wb > 0.0 { n.h / (wt + wb) } else { 1.0 };
+    let (wt, wr, wb, wl) = (wt * sh, wr * sw, wb * sh, wl * sw);
+    let (x, y, w, h) = (n.x, n.y, n.w, n.h);
+    // 四侧梯形（外角 → 内角斜切）：top / right / bottom / left
+    let quads: [[(f32, f32); 4]; 4] = [
+        [(x, y), (x + w, y), (x + w - wr, y + wt), (x + wl, y + wt)],
+        [(x + w, y), (x + w, y + h), (x + w - wr, y + h - wb), (x + w - wr, y + wt)],
+        [(x, y + h), (x + w, y + h), (x + w - wr, y + h - wb), (x + wl, y + h - wb)],
+        [(x, y), (x, y + h), (x + wl, y + h - wb), (x + wl, y + wt)],
+    ];
+    let ws = [wt, wr, wb, wl];
+    for (i, quad) in quads.iter().enumerate() {
+        if ws[i] <= 0.0 {
+            continue;
+        }
+        let c = mul_alpha(colors[i], opacity);
+        let mut p = Paint::default();
+        p.set_color_rgba8(c[0], c[1], c[2], c[3]);
+        p.anti_alias = true;
+        pixmap.fill_path(&quad_path(*quad), &p, FillRule::Winding, *draw_tx, None);
+    }
+}
+
+/// 边框四侧解析 → ([宽 top,right,bottom,left], [色 top,right,bottom,left])
+/// 回落链（每侧）：border-{side}-width/color/style > border-{side} 简写 > border-width/color/style（四值展开）> border 简写；
+/// 颜色缺省 = currentColor（节点 color）；样式 none/hidden → 该侧不画；
+/// 只声明样式未声明宽度 → CSS medium(3px)；只声明宽度未声明样式 → 按 solid 处理（兼容旧数据）
+fn border_sides(n: &PaintNode) -> ([f32; 4], [[u8; 4]; 4]) {
+    #[derive(PartialEq, Clone, Copy)]
+    enum BStyle {
+        None,
+        Solid,
+    }
+    let bstyle = |t: &str| -> Option<BStyle> {
+        match t.trim().to_lowercase().as_str() {
+            "none" | "hidden" => Some(BStyle::None),
+            // dashed/dotted/double 等先统一按 solid 绘制
+            "solid" | "double" | "dashed" | "dotted" | "groove" | "ridge" | "inset" | "outset" => Some(BStyle::Solid),
+            _ => None,
+        }
+    };
+    let len = |t: &str| -> Option<f32> {
+        let t = t.trim();
+        match t.to_lowercase().as_str() {
+            "thin" => return Some(1.0),
+            "medium" => return Some(3.0),
+            "thick" => return Some(5.0),
+            _ => {}
+        }
+        t.trim_end_matches("px").trim().parse::<f32>().ok()
+    };
+    // 简写值 "1px solid rgb(0, 0, 0)" → (宽, 色, 线型)
+    let short = |v: &str| -> (Option<f32>, Option<[u8; 4]>, Option<BStyle>) {
+        let (mut w, mut c, mut st) = (None, None, None);
+        for tok in split_ws_groups(v) {
+            if st.is_none() {
+                if let Some(s) = bstyle(&tok) {
+                    st = Some(s);
+                    continue;
+                }
+            }
+            if c.is_none() {
+                if let Some(col) = parse_color(&tok) {
+                    c = Some(col);
+                    continue;
+                }
+            }
+            if w.is_none() {
+                if let Some(l) = len(&tok) {
+                    w = Some(l);
+                }
+            }
+        }
+        (w, c, st)
+    };
+    let d = |k: &str| n.decls.get(k).map(String::as_str);
+    let bw4 = d("border-width").map(|v| expand4(&split_ws_groups(v).iter().filter_map(|t| len(t)).collect::<Vec<f32>>()));
+    let bc4 = d("border-color").map(|v| expand4(&split_ws_groups(v).iter().filter_map(|t| parse_color(t)).collect::<Vec<[u8; 4]>>()));
+    let bs4 = d("border-style").map(|v| expand4(&split_ws_groups(v).iter().filter_map(|t| bstyle(t)).collect::<Vec<BStyle>>()));
+    let bshort = d("border").map(short);
+
+    let mut widths = [0f32; 4];
+    let mut colors = [[0u8, 0, 0, 255]; 4];
+    for (i, side) in ["top", "right", "bottom", "left"].iter().enumerate() {
+        let s_short = d(&format!("border-{side}")).map(short);
+        let w = d(&format!("border-{side}-width"))
+            .and_then(len)
+            .or_else(|| s_short.as_ref().and_then(|s| s.0))
+            .or_else(|| bw4.as_ref().and_then(|a| a[i]))
+            .or_else(|| bshort.as_ref().and_then(|s| s.0));
+        let c = d(&format!("border-{side}-color"))
+            .and_then(parse_color)
+            .or_else(|| s_short.as_ref().and_then(|s| s.1))
+            .or_else(|| bc4.as_ref().and_then(|a| a[i]))
+            .or_else(|| bshort.as_ref().and_then(|s| s.1))
+            .unwrap_or_else(|| color_of(n)); // CSS: border-color 初始值 currentColor
+        let st = d(&format!("border-{side}-style"))
+            .and_then(bstyle)
+            .or_else(|| s_short.as_ref().and_then(|s| s.2))
+            .or_else(|| bs4.as_ref().and_then(|a| a[i]))
+            .or_else(|| bshort.as_ref().and_then(|s| s.2));
+        widths[i] = match (w, st) {
+            (_, Some(BStyle::None)) => 0.0, // none/hidden → 该侧不画
+            (Some(v), _) => v.max(0.0),
+            (None, Some(_)) => 3.0, // 仅声明样式：CSS medium
+            (None, None) => 0.0,
+        };
+        colors[i] = c;
+    }
+    (widths, colors)
+}
+
+/// 四值 CSS 简写展开（top/right/bottom/left；1/2/3 值按 CSS 规则补全）
+fn expand4<T: Copy>(p: &[T]) -> [Option<T>; 4] {
+    match p.len() {
+        1 => [Some(p[0]); 4],
+        2 => [Some(p[0]), Some(p[1]), Some(p[0]), Some(p[1])],
+        3 => [Some(p[0]), Some(p[1]), Some(p[2]), Some(p[1])],
+        4.. => [Some(p[0]), Some(p[1]), Some(p[2]), Some(p[3])],
+        _ => [None, None, None, None],
+    }
+}
+
+/// 按空白分割（括号内空格不切）："1px rgb(0, 0, 0)" → ["1px", "rgb(0, 0, 0)"]
+fn split_ws_groups(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut depth = 0i32;
+    for c in s.chars() {
+        match c {
+            '(' => {
+                depth += 1;
+                cur.push(c);
+            }
+            ')' => {
+                depth -= 1;
+                cur.push(c);
+            }
+            c if c.is_whitespace() && depth == 0 => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.trim().is_empty() {
+        out.push(cur.trim().to_string());
+    }
+    out
+}
+
+/// 四边形路径
+fn quad_path(pts: [(f32, f32); 4]) -> Path {
+    let mut pb = PathBuilder::new();
+    pb.move_to(pts[0].0, pts[0].1);
+    for p in &pts[1..] {
+        pb.line_to(p.0, p.1);
+    }
+    pb.close();
+    pb.finish().unwrap_or_else(|| PathBuilder::new().finish().unwrap())
+}
+
+/// alpha 预乘（opacity 等淡出系数）
+fn mul_alpha(c: [u8; 4], k: f32) -> [u8; 4] {
+    [c[0], c[1], c[2], (c[3] as f32 * k).clamp(0.0, 255.0) as u8]
 }
 
 
@@ -697,18 +872,23 @@ fn blit_r(pixmap: &mut Pixmap, img: &Pixmap, dx: f32, dy: f32, dw: f32, dh: f32,
     let y0 = dy.max(cy).floor() as i32;
     let x1 = (dx + dw).min(cx + cw).ceil() as i32;
     let y1 = (dy + dh).min(cy + ch).ceil() as i32;
+    // 圆角半径钳到边长一半（防 clamp(min>max) panic：radius 超过边长/2 时）
+    let r = if radius > 0.0 {
+        radius.max(0.0).min(cw.max(0.0).min(ch.max(0.0)) / 2.0)
+    } else {
+        0.0
+    };
     for py in y0..y1 {
         for px in x0..x1 {
             let sx = ((px as f32 - dx) / dw * iw).floor().clamp(0.0, iw - 1.0) as u32;
             let sy = ((py as f32 - dy) / dh * ih).floor().clamp(0.0, ih - 1.0) as u32;
-            if radius > 0.0 {
+            if r > 0.0 {
                 // 圆角内判断：像素点到圆角矩形内切盒的钳制点距离
-                let (cx0, cy0, cw0, ch0) = clip;
-                let qx = (px as f32).clamp(cx0 + radius, cx0 + cw0 - radius);
-                let qy = (py as f32).clamp(cy0 + radius, cy0 + ch0 - radius);
+                let qx = (px as f32).clamp(cx + r, cx + cw - r);
+                let qy = (py as f32).clamp(cy + r, cy + ch - r);
                 let ddx = px as f32 - qx;
                 let ddy = py as f32 - qy;
-                if ddx * ddx + ddy * ddy > radius * radius {
+                if ddx * ddx + ddy * ddy > r * r {
                     continue;
                 }
             }
@@ -758,50 +938,249 @@ fn draw_image(pixmap: &mut Pixmap, path: &str, x: f32, y: f32, w: f32, h: f32, _
     draw_one(pixmap, &img, x, y, w, h);
 }
 
-/// 背景图绘制（含 background-position 精灵取片 / background-size 缩放）
-fn draw_bg_image(pixmap: &mut Pixmap, n: &PaintNode, img: &Pixmap) {
-    let base = crate::renderer::BASE_DIR.get().map(String::as_str).unwrap_or(".");
-    let _ = base;
-    let (mut dw, mut dh) = (img.width() as f32, img.height() as f32);
-    if let Some(sz) = n.decls.get("background-size").or_else(|| {
-        n.decls.get("background").filter(|v| v.contains("background-size"))
-    }) {
-        (dw, dh) = crate::renderer::media::parse_size(sz, n.w, n.h, img.width(), img.height());
-    } else if let Some(bg) = n.decls.get("background") {
-        // 简写里可能带 "500px auto" 等尺寸？CSS 简写不含 size；保持固有
-        let _ = bg;
+/// 多层背景绘制：background-image: url(a), url(b) 逐层绘制（CSS 第一层最上，故从后往前画）。
+/// size/position/repeat 按逗号分层与图层循环对应（层数不足时循环使用）。
+/// images_only=true 时跳过渐变层（background 键兜底路径用：渐变已在背景色块处理）。
+fn draw_background_layers(
+    pixmap: &mut Pixmap,
+    n: &PaintNode,
+    decl: &str,
+    images_only: bool,
+    draw_tx: &Transform,
+    opacity: f32,
+    radius: f32,
+) {
+    let layers = split_commas(decl);
+    if layers.is_empty() {
+        return;
     }
-    let (ox, oy) = n
-        .decls
-        .get("background-position")
-        .map(|p| crate::renderer::media::parse_position(p))
-        .unwrap_or((0.0, 0.0));
-    // repeat 语义：CSS 默认 repeat（未写 no-repeat 时平铺铺满节点）
-    let bg = n.decls.get("background").cloned().unwrap_or_default();
-    let no_repeat = bg.contains("no-repeat")
-        || n.decls
-            .get("background-repeat")
-            .map(|v| v.contains("no-repeat"))
-            .unwrap_or(false);
-    let radius = n
-        .decls
-        .get("border-radius")
-        .and_then(|v| split_commas(v).first().and_then(|r| r.trim().trim_end_matches("px").parse::<f32>().ok()))
-        .unwrap_or(0.0);
-    if no_repeat {
-        // 精灵取片：背景图按 size 缩放后偏移 ox,oy，裁到节点矩形
-        blit_r(pixmap, img, n.x + ox, n.y + oy, dw, dh, (n.x, n.y, n.w, n.h), radius);
-    } else {
-        let mut ty = n.y + oy;
-        while ty < n.y + n.h {
-            let mut tx = n.x + ox;
-            while tx < n.x + n.w {
-                blit_r(pixmap, img, tx, ty, dw, dh, (n.x, n.y, n.w, n.h), radius);
-                if dw <= 0.0 { break; }
-                tx += dw;
+    let d = |k: &str| n.decls.get(k).cloned().unwrap_or_default();
+    let sizes = split_commas(&d("background-size"));
+    let poss = split_commas(&d("background-position"));
+    let reps = split_commas(&d("background-repeat"));
+    let pick = |list: &[String], def: &str, i: usize| -> String {
+        if list.is_empty() {
+            def.to_string()
+        } else {
+            list[i % list.len()].clone()
+        }
+    };
+    let base = crate::renderer::BASE_DIR.get().map(String::as_str).unwrap_or(".");
+    for (i, ly) in layers.iter().enumerate().rev() {
+        let layer = ly.trim();
+        if layer.is_empty() || layer.eq_ignore_ascii_case("none") {
+            continue;
+        }
+        match parse_bg(layer) {
+            Some(Bg::Image(path)) => {
+                if let Some(img) = crate::renderer::media::load(&path, base) {
+                    draw_bg_layer(
+                        pixmap,
+                        n,
+                        &img,
+                        &pick(&sizes, "auto", i),
+                        &pick(&poss, "0% 0%", i),
+                        &pick(&reps, "repeat", i),
+                        radius,
+                    );
+                }
             }
-            if dh <= 0.0 { break; }
-            ty += dh;
+            Some(other @ (Bg::Linear { .. } | Bg::Radial { .. })) => {
+                // 渐变层：铺满节点矩形（渐变的 size/position 暂不生效）
+                if !images_only {
+                    fill_gradient(pixmap, n, &other, draw_tx, opacity, radius);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// 渐变背景填充（linear/radial，铺满节点矩形，圆角裁剪，opacity 预乘到色标）
+fn fill_gradient(pixmap: &mut Pixmap, n: &PaintNode, g: &Bg, draw_tx: &Transform, opacity: f32, radius: f32) {
+    let fade = |stops: &[(f32, [u8; 4])]| -> Vec<(f32, [u8; 4])> {
+        stops.iter().map(|(p, c)| (*p, mul_alpha(*c, opacity))).collect()
+    };
+    match g {
+        Bg::Linear { deg, stops } => {
+            if let Some(shader) = linear_shader(*deg, &fade(stops), n.w, n.h) {
+                let path = rounded_rect_path(n.x, n.y, n.w, n.h, radius);
+                let mut p = Paint::default();
+                p.shader = shader;
+                p.anti_alias = true;
+                pixmap.fill_path(&path, &p, FillRule::Winding, *draw_tx, None);
+            }
+        }
+        Bg::Radial { stops } => {
+            if let (Some(fg), Some(lg)) = (stops.first(), stops.last()) {
+                let center = Point::from_xy(n.x + n.w / 2.0, n.y + n.h / 2.0);
+                let grad_r = n.w.min(n.h).max(1.0) / 2.0;
+                if let Some(gd) = RadialGradient::new(
+                    center,
+                    Point::from_xy(center.x + 1.0, center.y),
+                    grad_r,
+                    grad_stops(&[(0.0, fg.1), (1.0, lg.1)]),
+                    SpreadMode::Pad,
+                    Transform::identity(),
+                ) {
+                    let path = rounded_rect_path(n.x, n.y, n.w, n.h, radius);
+                    let mut p = Paint::default();
+                    p.shader = gd;
+                    p.anti_alias = true;
+                    pixmap.fill_path(&path, &p, FillRule::Winding, *draw_tx, None);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 单层背景图：size 缩放 → position 定位 → repeat 平铺，裁剪到节点矩形（圆角 mask）
+fn draw_bg_layer(pixmap: &mut Pixmap, n: &PaintNode, img: &Pixmap, size_s: &str, pos_s: &str, rep_s: &str, radius: f32) {
+    let (mut dw, mut dh) = (img.width() as f32, img.height() as f32);
+    let s = size_s.trim();
+    // contain（整图含入）/cover（覆盖裁剪）/像素/百分比（含 "100% auto" 双值、单值按比例）由 parse_size 处理
+    if !s.is_empty() && s != "auto" && s != "auto auto" {
+        let (w2, h2) = crate::renderer::media::parse_size(s, n.w, n.h, img.width(), img.height());
+        if w2 > 0.0 && h2 > 0.0 {
+            dw = w2;
+            dh = h2;
+        }
+    }
+    // 退化尺寸防护（避免平铺死循环）
+    if dw < 0.5 || dh < 0.5 {
+        return;
+    }
+    let (ox, oy) = parse_bg_pos(pos_s, n.w, n.h, dw, dh);
+    let (tile_x, tile_y) = parse_repeat(rep_s);
+    let (ax, ay) = (n.x + ox, n.y + oy);
+    let (x1, y1) = (n.x + n.w, n.y + n.h);
+    // repeat 平铺从锚点向两侧扩展（CSS 双向平铺；no-repeat 只画锚点一次）
+    let kx0 = if tile_x { ((n.x - ax) / dw).floor() as i32 } else { 0 };
+    let ky0 = if tile_y { ((n.y - ay) / dh).floor() as i32 } else { 0 };
+    let mut ky = ky0;
+    loop {
+        let ty = ay + ky as f32 * dh;
+        if ty >= y1 || (!tile_y && ky > ky0) {
+            break;
+        }
+        let mut kx = kx0;
+        loop {
+            let tx = ax + kx as f32 * dw;
+            if tx >= x1 || (!tile_x && kx > kx0) {
+                break;
+            }
+            blit_r(pixmap, img, tx, ty, dw, dh, (n.x, n.y, n.w, n.h), radius);
+            kx += 1;
+        }
+        ky += 1;
+    }
+}
+
+/// 单分量 background-position → 像素偏移（百分比 = 剩余空间 (容器-图) × p：
+/// "图片 p% 点对齐容器 p% 点" 的等价形式）
+fn bg_pos_comp(t: &str, container: f32, img: f32) -> Option<f32> {
+    match t {
+        "left" | "top" => Some(0.0),
+        "center" => Some((container - img) * 0.5),
+        "right" | "bottom" => Some(container - img),
+        _ => {
+            if let Some(p) = t.strip_suffix('%') {
+                p.trim().parse::<f32>().ok().map(|n| (container - img) * n / 100.0)
+            } else {
+                t.trim_end_matches("px").trim().parse::<f32>().ok()
+            }
+        }
+    }
+}
+
+/// background-position 全形态解析 → (ox, oy) 像素偏移：
+/// 关键字（top/center/bottom/left/right）、百分比（"50% 40%"）、像素（可负，精灵图）、
+/// 混用（"left 40%"）、四值形态（"left 10px top 20px"）；单值时缺省轴 = center
+fn parse_bg_pos(v: &str, cw: f32, ch: f32, iw: f32, ih: f32) -> (f32, f32) {
+    let toks: Vec<String> = v.split_whitespace().map(|s| s.trim().to_lowercase()).collect();
+    // 四值形态："left 10px top 20px" / "right 20% bottom 5px"（关键字+偏移成对，right/bottom 从对边内推）
+    if toks.len() >= 4 {
+        let pair = |kw: &str, off: &str, container: f32, img: f32, from_end: bool| -> f32 {
+            let o = if let Some(p) = off.trim().strip_suffix('%') {
+                p.trim().parse::<f32>().unwrap_or(0.0) / 100.0 * (container - img)
+            } else {
+                off.trim().trim_end_matches("px").trim().parse::<f32>().unwrap_or(0.0)
+            };
+            let base = match kw {
+                "center" => (container - img) * 0.5,
+                "right" | "bottom" => container - img,
+                _ => 0.0,
+            };
+            if from_end { base - o } else { base + o }
+        };
+        let (mut x, mut y) = (0f32, 0f32);
+        let mut i = 0;
+        while i + 1 < toks.len() {
+            match toks[i].as_str() {
+                "left" => x = pair("left", &toks[i + 1], cw, iw, false),
+                "right" => x = pair("right", &toks[i + 1], cw, iw, true),
+                "top" => y = pair("top", &toks[i + 1], ch, ih, false),
+                "bottom" => y = pair("bottom", &toks[i + 1], ch, ih, true),
+                _ => {}
+            }
+            i += 2;
+        }
+        return (x, y);
+    }
+    // 1-2 值形态：关键字/百分比/像素混用；先出现的数值归 x，其次 y
+    let (mut x, mut y) = (None, None);
+    for t in &toks {
+        match t.as_str() {
+            "left" => x = Some(0.0),
+            "right" => x = Some(cw - iw),
+            "top" => y = Some(0.0),
+            "bottom" => y = Some(ch - ih),
+            "center" => {
+                if x.is_none() {
+                    x = Some((cw - iw) * 0.5);
+                } else if y.is_none() {
+                    y = Some((ch - ih) * 0.5);
+                }
+            }
+            _ => {
+                if x.is_none() {
+                    if let Some(v) = bg_pos_comp(t, cw, iw) {
+                        x = Some(v);
+                        continue;
+                    }
+                }
+                if y.is_none() {
+                    if let Some(v) = bg_pos_comp(t, ch, ih) {
+                        y = Some(v);
+                    }
+                }
+            }
+        }
+    }
+    match (x, y) {
+        (Some(a), Some(b)) => (a, b),
+        (Some(a), None) => (a, (ch - ih) * 0.5), // 单值：缺省轴 = center
+        (None, Some(b)) => ((cw - iw) * 0.5, b),
+        (None, None) => (0.0, 0.0),
+    }
+}
+
+/// background-repeat → (平铺 x, 平铺 y)；支持 repeat-x / repeat-y / 双轴形式
+fn parse_repeat(v: &str) -> (bool, bool) {
+    let t = v.trim().to_lowercase();
+    match t.as_str() {
+        "repeat-x" => (true, false),
+        "repeat-y" => (false, true),
+        "no-repeat" => (false, false),
+        "" => (true, true),
+        _ => {
+            let toks: Vec<&str> = t.split_whitespace().collect();
+            let ax = |s: &str| !s.contains("no-repeat");
+            match toks.len() {
+                1 => (ax(toks[0]), ax(toks[0])),
+                _ => (ax(toks[0]), ax(toks[1])),
+            }
         }
     }
 }
