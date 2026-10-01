@@ -343,18 +343,28 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
             if n.tag == "img" {
                 if let Some(src) = &n.src {
                     if let Some(pm) = crate::renderer::media::load(src, base_dir) {
-                        let iw = n
+                        let has_w = n.decl("width").is_some();
+                        let has_h = n.decl("height").is_some();
+                        let mut iw = n
                             .decl("width")
                             .and_then(|v| v.trim().trim_end_matches("px").parse::<f32>().ok())
                             .unwrap_or(pm.width() as f32);
-                        let ih = n
+                        let mut ih = n
                             .decl("height")
                             .and_then(|v| v.trim().trim_end_matches("px").parse::<f32>().ok())
                             .unwrap_or(pm.height() as f32 * iw / pm.width() as f32);
-                        st.size = taffy::Size {
-                            width: taffy::style_helpers::length(iw),
-                            height: taffy::style_helpers::length(ih),
-                        };
+                        // 自然尺寸超出容器宽：等比缩到容器宽（img 不会主动溢出普通容器）
+                        if !has_w && width > 0.0 && iw > width {
+                            ih *= width / iw;
+                            iw = width;
+                        }
+                        // 有 CSS width/height 折算值时保留（style_of 已算好），不覆盖
+                        if !has_w {
+                            st.size.width = taffy::style_helpers::length(iw);
+                        }
+                        if !has_h {
+                            st.size.height = taffy::style_helpers::length(ih);
+                        }
                     }
                 }
             }

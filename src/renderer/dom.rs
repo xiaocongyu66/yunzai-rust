@@ -154,19 +154,27 @@ fn build(h: &Handle) -> StyleNode {
 
     if let NodeData::Element { name, attrs, .. } = &h.data {
         node.tag = name.local.to_string();
+        // presentation hints（width/height 属性）先入 decls，style 属性后入（覆盖属性，与 CSS 优先级一致）
+        let mut style_attr = None;
         for a in attrs.borrow().iter() {
             let k = a.name.local.to_string();
             let v = a.value.to_string();
             match k.as_str() {
                 "id" => node.id = Some(v),
                 "class" => node.classes = v.split_whitespace().map(String::from).collect(),
-                "style" => {
-                    for (dk, dv) in crate::renderer::css::parse_declarations(&v) {
-                        node.decls.insert(dk, dv);
+                "style" => style_attr = Some(v),
+                "src" => node.src = Some(v),
+                "width" | "height" if node.tag == "img" => {
+                    if let Ok(n) = v.trim().parse::<f32>() {
+                        node.decls.insert(k, format!("{n}px"));
                     }
                 }
-                "src" => node.src = Some(v),
                 _ => {}
+            }
+        }
+        if let Some(sv) = style_attr {
+            for (dk, dv) in crate::renderer::css::parse_declarations(&sv) {
+                node.decls.insert(dk, dv);
             }
         }
     }
