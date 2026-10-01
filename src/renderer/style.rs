@@ -1137,10 +1137,10 @@ fn mat_of(t: &lightningcss::properties::transform::Transform) -> [f32; 6] {
         T::SkewX(x) => [1.0, 0.0, angle_rad(x).tan(), 1.0, 0.0, 0.0],
         T::SkewY(y) => [1.0, angle_rad(y).tan(), 0.0, 1.0, 0.0, 0.0],
         T::Matrix(m) => [m.a, m.b, m.c, m.d, m.e, m.f],
-        // 3D 矩阵按 2D 投影近似（a b c d e f 分量）
-        T::Matrix3d(m) => [m.a, m.b, m.c, m.d, m.e, m.f],
+        // 3D 矩阵按 2D 投影近似（m11/m12/m21/m22/e/f）
+        T::Matrix3d(m) => [m.m11, m.m12, m.m21, m.m22, m.m41, m.m42],
         T::Rotate3d(_, _, _, a) => {
-            let rad = a.rad();
+            let rad = a.to_radians();
             [rad.cos(), -rad.sin(), rad.sin(), rad.cos(), 0.0, 0.0]
         }
         T::RotateX(_) | T::RotateY(_) => [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
