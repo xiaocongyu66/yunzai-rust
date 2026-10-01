@@ -72,6 +72,10 @@ pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> R
 /// op 层入口：JSON 参数 { html, width?, fontDirs? } → { data: base64, width, height }
 pub fn render_op(args: &Value) -> Value {
     let html = args.get("html").and_then(Value::as_str).unwrap_or("");
+    // 调试：最近一次渲染的 HTML 落盘（真实模板复现用）
+    if !html.is_empty() {
+        let _ = std::fs::write("/tmp/last_render.html", html);
+    }
     let base_dir = args
         .get("baseDir")
         .and_then(Value::as_str)
