@@ -403,12 +403,18 @@ fn apply(p: &Property, basis: f32, r: &mut Resolved) {
         P::Bottom(v) => r.inset.bottom = tlpa(v, basis),
         P::Left(v) => r.inset.left = tlpa(v, basis),
         P::Display(d) => {
-            use lightningcss::properties::display::{Display as LD, DisplayInside};
+            use lightningcss::properties::display::{Display as LD, DisplayInside, DisplayKeyword};
             r.display = match d {
-                LD::Keyword(_) => Display::None,
+                LD::Keyword(kw) => match kw {
+                    DisplayKeyword::None => Display::None,
+                    // contents 近似为参与布局（Flex）；table 系关键字（table-cell/row/row-group 等）统一 Flex，
+                    // 方向与均分由 layout::style_of 的 table_decl 特判处理
+                    _ => Display::Flex,
+                },
                 LD::Pair(p) => match p.inside {
                     DisplayInside::Flex(_) => Display::Flex,
                     DisplayInside::Grid => Display::Grid,
+                    // Flow/FlowRoot/Table/Box/Ruby → Flex（table 容器纵排由 style_of 处理）
                     _ => Display::Flex,
                 },
             };
