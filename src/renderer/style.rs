@@ -244,6 +244,7 @@ pub enum LineH {
 // ==================== Resolved ====================
 
 /// 解析后的属性集（basis 为百分比参照宽，一般为父容器宽）
+#[derive(Clone)]
 pub struct Resolved {
     pub width: Dimension,
     pub height: Dimension,
@@ -1035,7 +1036,11 @@ fn border_style_hidden(s: &lightningcss::properties::border::LineStyle) -> bool 
 }
 
 /// border-top/right/bottom/left 简写（GenericBorder）落到单侧
-fn border_side(r: &mut Resolved, i: usize, b: &lightningcss::properties::border::BorderTop) {
+fn border_side<const P: u8>(
+    r: &mut Resolved,
+    i: usize,
+    b: &lightningcss::properties::border::GenericBorder<lightningcss::properties::border::LineStyle, P>,
+) {
     r.border_hidden[i] = border_style_hidden(&b.style);
     r.border_raw[i] = border_side_width(&b.width);
     let c = css_color(&b.color, r.color).unwrap_or([0, 0, 0, 0]);
@@ -1132,6 +1137,13 @@ fn mat_of(t: &lightningcss::properties::transform::Transform) -> [f32; 6] {
         T::SkewX(x) => [1.0, 0.0, angle_rad(x).tan(), 1.0, 0.0, 0.0],
         T::SkewY(y) => [1.0, angle_rad(y).tan(), 0.0, 1.0, 0.0, 0.0],
         T::Matrix(m) => [m.a, m.b, m.c, m.d, m.e, m.f],
+        // 3D 矩阵按 2D 投影近似（a b c d e f 分量）
+        T::Matrix3d(m) => [m.a, m.b, m.c, m.d, m.e, m.f],
+        T::Rotate3d(_, _, _, a) => {
+            let rad = a.rad();
+            [rad.cos(), -rad.sin(), rad.sin(), rad.cos(), 0.0, 0.0]
+        }
+        T::RotateX(_) | T::RotateY(_) => [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
     }
 }
 

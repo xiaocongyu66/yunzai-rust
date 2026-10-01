@@ -224,7 +224,7 @@ fn draw_node_r(pixmap: &mut Pixmap, n: &PaintNode, r: &Resolved, fonts: &mut sup
     }
 
     // 6. 子节点：z-index 稳定排序（负值在下、正值在上，同值保持 DOM 序）
-    let mut ordered: Vec<(&PaintNode, Resolved)> = n
+    let mut ordered: Vec<(&PaintNode, &Resolved)> = n
         .children
         .iter()
         .map(|c| (c, &c.style))
@@ -509,8 +509,9 @@ fn blend_glyph(pixmap: &mut Pixmap, x: i32, y: i32, c: cosmic_text::Color) {
     if sa == 0 {
         return;
     }
+    let pw = pixmap.width();
     let data = pixmap.data_mut();
-    let di = ((y * pixmap.width() + x) * 4) as usize;
+    let di = ((y * pw + x) * 4) as usize;
     // 源色预乘后与目标（premul）做 src-over：out = src + dst × (1 - sa)
     let sr = (c.r() as u32 * sa + 127) / 255;
     let sg = (c.g() as u32 * sa + 127) / 255;
