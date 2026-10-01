@@ -6,6 +6,7 @@ use super::style::Resolved;
 use super::text::{TextAlign, TextEngine};
 use std::collections::BTreeMap;
 use taffy::prelude::*;
+use taffy::util::Resolve;
 
 /// 布局完成的绘制节点（绝对坐标 + 原始声明 + 结构化绘制样式）
 #[derive(Clone)]
@@ -331,6 +332,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
             };
             w -= ppx(st.padding.left) + ppx(st.padding.right);
             w -= st.margin.left.maybe_resolve(16.0).unwrap_or(0.0) + st.margin.right.maybe_resolve(16.0).unwrap_or(0.0);
+            // maybe_resolve 是 Resolve trait 方法，需引入
             w.max(0.0)
         };
         let mut child_ids = Vec::new();
