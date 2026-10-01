@@ -794,7 +794,7 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEn
     let base_x = (n.x + dx).round() as i32;
     let base_y = n.y.round() as i32;
 
-    buffer.draw(&mut fonts.font_system, &mut fonts.swash, color, |gx, gy, gw, gh, color| {
+    super::text::draw_with_letter_spacing(&buffer, fonts, color, n.letter_spacing, |gx, gy, gw, gh, color| {
         // 回调给的是设备像素矩形 + 颜色（alpha 已混合）
         let px = (base_x as i32) + gx;
         let py = (base_y as i32) + gy;
