@@ -146,13 +146,44 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
         && table_decl != "table-cell"
         && (display_decl.is_none() || matches!(table_decl, "block" | "flow" | "flow-root" | "list-item"));
 
+    // box-sizing: border-box → taffy 是 content-box 语义：显式尺寸先扣掉 padding+border
+    let mut w_d = r.width;
+    let mut h_d = r.height;
+    let mut minw_d = r.min_width;
+    let mut minh_d = r.min_height;
+    let mut maxw_d = r.max_width;
+    let mut maxh_d = r.max_height;
+    if r.border_box {
+        let px = |v: Dimension| match v {
+            Dimension::Length(l) => l,
+            _ => 0.0,
+        };
+        let pad_h = px(r.padding.left) + px(r.padding.right);
+        let pad_v = px(r.padding.top) + px(r.padding.bottom);
+        let bw = d("border-width")
+            .and_then(|v| v.trim().trim_end_matches("px").parse::<f32>().ok())
+            .unwrap_or(0.0)
+            * 2.0;
+        let sub_w = pad_h + bw;
+        let sub_h = pad_v + bw;
+        let shrink = |dim: Dimension, sub: f32| match dim {
+            Dimension::Length(l) => Dimension::Length((l - sub).max(0.0)),
+            other => other,
+        };
+        w_d = shrink(w_d, sub_w);
+        h_d = shrink(h_d, sub_h);
+        minw_d = shrink(minw_d, sub_w);
+        minh_d = shrink(minh_d, sub_h);
+        maxw_d = shrink(maxw_d, sub_w);
+        maxh_d = shrink(maxh_d, sub_h);
+    }
     let mut style = Style {
         display: r.display,
         position: r.position,
         inset: r.inset,
-        size: Size { width: r.width, height: r.height },
-        min_size: Size { width: r.min_width, height: r.min_height },
-        max_size: Size { width: r.max_width, height: r.max_height },
+        size: Size { width: w_d, height: h_d },
+        min_size: Size { width: minw_d, height: minh_d },
+        max_size: Size { width: maxw_d, height: maxh_d },
         margin: r.margin,
         padding: r.padding,
         gap: r.gap,
