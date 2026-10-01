@@ -154,12 +154,12 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
     let mut maxw_d = r.max_width;
     let mut maxh_d = r.max_height;
     if r.border_box {
-        let px = |v: Dimension| match v {
-            Dimension::Length(l) => l,
+        let pxlp = |v: LengthPercentage| match v {
+            LengthPercentage::Length(l) => l,
             _ => 0.0,
         };
-        let pad_h = px(r.padding.left) + px(r.padding.right);
-        let pad_v = px(r.padding.top) + px(r.padding.bottom);
+        let pad_h = pxlp(r.padding.left) + pxlp(r.padding.right);
+        let pad_v = pxlp(r.padding.top) + pxlp(r.padding.bottom);
         let bw = d("border-width")
             .and_then(|v| v.trim().trim_end_matches("px").parse::<f32>().ok())
             .unwrap_or(0.0)
