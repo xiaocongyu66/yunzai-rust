@@ -319,10 +319,23 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
             return Ok(id);
         }
 
-        // 容器
+        // 容器：递归子节点时传"实际可用宽"（CSS 显式宽优先，扣除自身 padding/margin）
+        let cw = {
+            let mut w = match st.size.width {
+                Dimension::Length(l) => l,
+                _ => width,
+            };
+            let ppx = |v: LengthPercentage| match v {
+                LengthPercentage::Length(l) => l,
+                _ => 0.0,
+            };
+            w -= ppx(st.padding.left) + ppx(st.padding.right);
+            w -= ppx(st.margin.left.resolve(16.0)) + ppx(st.margin.right.resolve(16.0));
+            w.max(0.0)
+        };
         let mut child_ids = Vec::new();
         for c in &n.children {
-            child_ids.push(add(taffy, fonts, c, width, font_size, align, base_dir)?);
+            child_ids.push(add(taffy, fonts, c, cw, font_size, align, base_dir)?);
         }
         // 混合节点：自身文本作为附加叶子（尺寸由 measure 决定）
         if !n.text.is_empty() {
