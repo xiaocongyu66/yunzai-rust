@@ -2,7 +2,7 @@
 //!
 //! 所有绘制参数（颜色/渐变/阴影/边框/圆角/变换/背景 size-position-repeat/
 //! 文本属性/透明度）均来自结构化样式 [`super::style::Resolved`]：绘制入口对每个
-//! 节点调用 `style::resolve_from_decls(&PaintNode.decls, PaintNode.w)` 取得，
+//! 结构化样式由 layout 侧 `style::resolve` 产出并回填到 `PaintNode.style`，
 //! 本模块只做几何计算与光栅化（路径构造 / 渐变 shader / 阴影分层近似 /
 //! 平铺循环 / 像素混合）。
 //!
@@ -22,8 +22,8 @@
 
 use super::layout::PaintNode;
 use super::style::{
-    resolve_from_decls, BgLayer, BgPaint, BgPosComp, BgRepeat, BgSize, CornerRadiusP, LengthOrPct,
-    LineH, Resolved, Rgba, ShadowP,
+    BgLayer, BgPaint, BgPosComp, BgRepeat, BgSize, CornerRadiusP, LengthOrPct, LineH, Resolved,
+    Rgba, ShadowP,
 };
 use super::text::TextAlign;
 use taffy::style::Overflow;
@@ -160,9 +160,9 @@ pub fn paint(root: &PaintNode, width: f32, height: f32, fonts: &mut super::text:
     pixmap.encode_png().map_err(|e| e.to_string())
 }
 
-/// 单节点绘制：结构化样式解析（style.rs::resolve_from_decls）→ 纯几何绘制
+/// 单节点绘制：结构化样式（layout 侧回填到 PaintNode.style）→ 纯几何绘制
 fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEngine) {
-    let r = resolve_from_decls(&n.decls, n.w);
+    let r = &n.style;
     draw_node_r(pixmap, n, &r, fonts);
 }
 
@@ -227,7 +227,7 @@ fn draw_node_r(pixmap: &mut Pixmap, n: &PaintNode, r: &Resolved, fonts: &mut sup
     let mut ordered: Vec<(&PaintNode, Resolved)> = n
         .children
         .iter()
-        .map(|c| (c, resolve_from_decls(&c.decls, c.w)))
+        .map(|c| (c, &c.style))
         .collect();
     ordered.sort_by_key(|(_, cr)| cr.z_index);
 
