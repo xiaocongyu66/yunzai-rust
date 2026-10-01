@@ -25,6 +25,18 @@ impl StyleNode {
     }
 }
 
+/// 标签默认 display：CSS 行内（phrasing）元素 → true(inline)，其余默认块级。
+/// 供 layout::style_of 做 display 近似（CSS 显式声明 display 时优先于标签默认）。
+pub fn tag_inline(tag: &str) -> bool {
+    matches!(
+        tag,
+        "span" | "a" | "strong" | "em" | "b" | "i" | "code" | "label" | "small" | "u" | "s"
+            | "sub" | "sup" | "abbr" | "bdi" | "bdo" | "big" | "br" | "button" | "cite" | "data"
+            | "dfn" | "font" | "ins" | "kbd" | "mark" | "nobr" | "output" | "q" | "rp" | "rt"
+            | "ruby" | "samp" | "time" | "tt" | "var" | "wbr" | "::before" | "::after"
+    )
+}
+
 #[derive(Clone)]
 pub struct CssRule {
     pub selector: Vec<SelectorPart>,
@@ -164,12 +176,21 @@ fn build(h: &Handle) -> StyleNode {
     for c in h.children.borrow().iter() {
         match &c.data {
             NodeData::Text { contents } => direct.push_str(&contents.borrow()),
-            _ => node.children.push(build(c)),
+            _ => {
+                let t = tag_name(c);
+                // 不可见标签不产生节点：script 直接跳过子树；style 的 CSS 内容
+                // 已由 walk 收集进样式表；head/title/meta/link/base/noscript/template 不渲染
+                if matches!(
+                    t.as_str(),
+                    "#comment" | "head" | "script" | "style" | "title" | "meta" | "link"
+                        | "base" | "noscript" | "template"
+                ) {
+                    continue;
+                }
+                node.children.push(build(c));
+            }
         }
     }
     node.text = direct.split_whitespace().collect::<Vec<_>>().join(" ");
-
-    // 过滤注释/头
-    node.children.retain(|c| c.tag != "#comment" && c.tag != "head");
     node
 }

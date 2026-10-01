@@ -19,6 +19,9 @@ pub struct PaintNode {
     pub children: Vec<PaintNode>,
     pub src: Option<String>,
     pub tag: String,
+    /// letter-spacing（px）：绘制回调逐 glyph 加累计 x 偏移 i * letter_spacing
+    /// （见 text::draw_with_letter_spacing）
+    pub letter_spacing: f32,
 }
 
 /// taffy 节点上下文（所有节点）：样式声明 + 文本信息
@@ -34,6 +37,10 @@ pub struct NodeCtx {
     pub src: Option<String>,
     pub family: Option<String>,
     pub tag: String,
+    /// letter-spacing（px）
+    pub letter_spacing: f32,
+    /// ellipsis 截断的定宽约束（measure 间传递：min-content 等无定宽 pass 复用）
+    pub ellip_w: Option<f32>,
 }
 
 pub struct Tree {
@@ -112,12 +119,34 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
     // 全量映射走 style::resolve（Lightning CSS 结构化），此处只补充 taffy 特有字段
     let d = |k: &str| n.decl(k).map(String::from);
     let r = super::style::resolve(n, width);
-    let display = d("display");
-    let is_flex = display.as_deref() == Some("flex") || display.as_deref() == Some("inline-flex");
+    let display_decl = d("display");
+    // display 决策：CSS 显式声明优先；未声明时按标签默认（dom::tag_inline → inline，其余 block）
+    let inline_like = match display_decl.as_deref() {
+        Some(v) => matches!(
+            v.trim(),
+            "inline" | "inline-block" | "inline-flex" | "inline-table" | "run-in"
+        ),
+        None => super::dom::tag_inline(&n.tag),
+    };
+    // table 现有近似优先：CSS 声明的 table-row/table-cell 走原逻辑；裸 table 系标签
+    // 同样豁免块流改写（保持既有横排 flex 近似不被破坏）
+    let table_decl = display_decl.as_deref().map(str::trim).unwrap_or("");
+    let table_native = display_decl.is_none()
+        && matches!(
+            n.tag.as_str(),
+            "table" | "thead" | "tbody" | "tfoot" | "caption" | "colgroup" | "col" | "tr" | "td" | "th"
+        );
     // table-cell：均分父行宽度
-    let cell_grow = if display.as_deref() == Some("table-cell") { 1.0 } else { 0.0 };
+    let cell_grow = if table_decl == "table-cell" { 1.0 } else { 0.0 };
+    // 块流近似：块级容器纵向排布（taffy 无 block 流，用 column flex 表达）；
+    // inline 子节点间的块级换行由父容器 column 方向自然产生
+    let block_flow = !inline_like
+        && !table_native
+        && table_decl != "table-row"
+        && table_decl != "table-cell"
+        && (display_decl.is_none() || matches!(table_decl, "block" | "flow" | "flow-root" | "list-item"));
 
-    Style {
+    let mut style = Style {
         display: r.display,
         position: r.position,
         inset: r.inset,
@@ -137,7 +166,19 @@ fn style_of(n: &StyleNode, width: f32) -> Style {
         align_content: r.align_content,
         overflow: r.overflow,
         ..Default::default()
+    };
+    if inline_like && r.display != Display::None {
+        // inline 近似：行内收缩盒 → 横向 flex 排列内容，flex_grow 0 收缩内容宽
+        style.display = Display::Flex;
+        style.flex_direction = FlexDirection::Row;
+        style.align_items = Some(AlignItems::FlexStart);
+        style.flex_grow = 0.0;
+        // 防父级交叉轴 stretch 拉满宽度：自身起点对齐 → 收缩内容宽
+        style.align_self = Some(AlignItems::FlexStart);
+    } else if block_flow {
+        style.flex_direction = FlexDirection::Column;
     }
+    style
 }
 
 fn text_info(
@@ -157,12 +198,25 @@ fn text_info(
         .decl("color")
         .and_then(super::paint::parse_color)
         .unwrap_or([26, 26, 26, 255]);
+    // line-height 三形态：无单位倍数（× font-size）、px 固定值、百分比（× font-size）
     let lh = n
         .decl("line-height")
         .and_then(|v| {
-            let t = v.trim().trim_end_matches("px").trim();
-            t.parse::<f32>().ok().or_else(|| t.parse::<f32>().ok().map(|m| m * font_size))
+            let t = v.trim();
+            if let Some(p) = t.strip_suffix('%') {
+                p.trim().parse::<f32>().ok().map(|m| m / 100.0 * font_size)
+            } else if let Some(px) = t.strip_suffix("px") {
+                px.trim().parse::<f32>().ok()
+            } else if let Some(em) = t.strip_suffix("em") {
+                em.trim().parse::<f32>().ok().map(|m| m * font_size)
+            } else if let Some(rem) = t.strip_suffix("rem") {
+                rem.trim().parse::<f32>().ok().map(|m| m * 16.0)
+            } else {
+                // 无单位数值：CSS 语义为 font-size 的倍数
+                t.parse::<f32>().ok().map(|m| m * font_size)
+            }
         })
+        .filter(|v| *v > 0.0)
         .unwrap_or(font_size * 1.5);
     // font-family：取逗号分隔的第一项（去引号）；排除通用族关键字
     let family = n.decl("font-family").and_then(|v| {
@@ -193,6 +247,9 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
     ) -> Result<taffy::NodeId, String> {
         let st = style_of(n, width);
         let (font_size, weight, color, lh, align, family) = text_info(n, parent_font, parent_align);
+        // white-space / text-overflow / letter-spacing（decls 透传，测量与绘制共用判定）
+        let nowrap = super::text::white_space_nowrap(&n.decls);
+        let ellipsis = nowrap && super::text::text_overflow_ellipsis(&n.decls);
         let base_ctx = NodeCtx {
             decls: n.decls.clone(),
             text: n.text.clone(),
@@ -204,10 +261,18 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
             src: n.src.clone(),
             family,
             tag: n.tag.clone(),
+            letter_spacing: super::text::letter_spacing_px(&n.decls),
+            ellip_w: None,
         };
 
         // 文本叶子：无子节点但有文本（尺寸由 compute_layout_with_measure 按约束宽度动态换行）
         if n.children.is_empty() && !n.text.is_empty() {
+            let mut st = st;
+            // white-space:nowrap（无 ellipsis）：禁止收缩与交叉轴拉伸，保持单行自然宽度
+            if nowrap && !ellipsis {
+                st.flex_shrink = 0.0;
+                st.align_self = Some(AlignItems::FlexStart);
+            }
             let id = taffy
                 .new_leaf(st)
                 .map_err(|e| e.to_string())?;
@@ -222,8 +287,13 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
         }
         // 混合节点：自身文本作为附加叶子（尺寸由 measure 决定）
         if !n.text.is_empty() {
+            let mut leaf_st = Style::default();
+            if nowrap && !ellipsis {
+                leaf_st.flex_shrink = 0.0;
+                leaf_st.align_self = Some(AlignItems::FlexStart);
+            }
             let id = taffy
-                .new_leaf(Style::default())
+                .new_leaf(leaf_st)
                 .map_err(|e| e.to_string())?;
             taffy.set_node_context(id, Some(base_ctx.clone())).map_err(|e| e.to_string())?;
             child_ids.push(id);
@@ -266,14 +336,68 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
 pub fn compute(mut tree: Tree, width: f32, fonts: &mut TextEngine) -> Result<(PaintNode, f32), String> {
     let space = Size { width: AvailableSpace::Definite(width), height: AvailableSpace::MaxContent };
     tree.taffy
-        .compute_layout_with_measure(tree.root, space, |known, _avail, _node, ctx, style| {
+        .compute_layout_with_measure(tree.root, space, |known, avail, _node, ctx, style| {
             if let Some(ctx) = ctx {
                 if !ctx.text.is_empty() {
-                    // 约束宽度内动态换行；无约束时单行
+                    // 显式声明宽（Length）作为约束之一
                     let declared = match style.size.width {
                         Dimension::Length(l) => Some(l),
                         _ => None,
                     };
+                    // white-space:nowrap / pre：单行排版，测量不做换行约束
+                    if super::text::white_space_nowrap(&ctx.decls) {
+                        // text-overflow:ellipsis → 定宽内截断加省略号（单行高度）
+                        if super::text::text_overflow_ellipsis(&ctx.decls) {
+                            let ew = known
+                                .width
+                                .or(declared)
+                                .filter(|w| *w > 0.0)
+                                .or_else(|| match avail.width {
+                                    AvailableSpace::Definite(w) if w > 0.0 => Some(w),
+                                    _ => None,
+                                });
+                            // 定宽约束在多次 measure 间传递（min-content 等 pass 复用）
+                            if ew.is_some() {
+                                ctx.ellip_w = ew;
+                            }
+                            if let Some(ew) = ew.or(ctx.ellip_w).filter(|w| *w > 0.0) {
+                                if let Some(ellipsized) = fonts.ellipsize(
+                                    &ctx.text,
+                                    ctx.font_size,
+                                    ctx.weight,
+                                    ctx.line_height,
+                                    ctx.family.as_deref(),
+                                    ew,
+                                    ctx.letter_spacing,
+                                ) {
+                                    let (tw, th) = fonts.measure(
+                                        &ellipsized,
+                                        ctx.font_size,
+                                        ctx.weight,
+                                        ctx.color,
+                                        None,
+                                        ctx.line_height,
+                                        ctx.family.as_deref(),
+                                        ctx.letter_spacing,
+                                    );
+                                    return Size { width: tw.min(ew), height: th };
+                                }
+                            }
+                        }
+                        // 无换行约束：单行自然宽度
+                        let (tw, th) = fonts.measure(
+                            &ctx.text,
+                            ctx.font_size,
+                            ctx.weight,
+                            ctx.color,
+                            None,
+                            ctx.line_height,
+                            ctx.family.as_deref(),
+                            ctx.letter_spacing,
+                        );
+                        return Size { width: tw, height: th };
+                    }
+                    // 约束宽度内动态换行；无约束时单行
                     let maxw = known.width.or(declared).filter(|w| *w > 0.0);
                     let (tw, th) = fonts.measure(
                         &ctx.text,
@@ -283,6 +407,7 @@ pub fn compute(mut tree: Tree, width: f32, fonts: &mut TextEngine) -> Result<(Pa
                         maxw,
                         ctx.line_height,
                         ctx.family.as_deref(),
+                        ctx.letter_spacing,
                     );
                     return Size { width: tw, height: th };
                 }
@@ -294,11 +419,17 @@ pub fn compute(mut tree: Tree, width: f32, fonts: &mut TextEngine) -> Result<(Pa
         })
         .map_err(|e| e.to_string())?;
     let total = tree.taffy.layout(tree.root).map_err(|e| e.to_string())?.size.height;
-    let painted = collect(&mut tree.taffy, tree.root, 0.0, 0.0)?;
+    let painted = collect(&mut tree.taffy, tree.root, 0.0, 0.0, fonts)?;
     Ok((painted, total))
 }
 
-fn collect(taffy: &mut TaffyTree<NodeCtx>, id: taffy::NodeId, ox: f32, oy: f32) -> Result<PaintNode, String> {
+fn collect(
+    taffy: &mut TaffyTree<NodeCtx>,
+    id: taffy::NodeId,
+    ox: f32,
+    oy: f32,
+    fonts: &mut TextEngine,
+) -> Result<PaintNode, String> {
     let (nx, ny, nw, nh) = {
         let lay = taffy.layout(id).map_err(|e| e.to_string())?;
         (ox + lay.location.x, oy + lay.location.y, lay.size.width, lay.size.height)
@@ -316,13 +447,15 @@ fn collect(taffy: &mut TaffyTree<NodeCtx>, id: taffy::NodeId, ox: f32, oy: f32) 
         src: None,
         family: None,
         tag: String::new(),
+        letter_spacing: 0.0,
+        ellip_w: None,
     });
     let mut children = Vec::new();
     let kids = taffy.children(id).map_err(|e| e.to_string())?;
     for c in kids {
-        children.push(collect(taffy, c, x, y)?);
+        children.push(collect(taffy, c, x, y, fonts)?);
     }
-    Ok(PaintNode {
+    let mut node = PaintNode {
         x,
         y,
         w: nw,
@@ -333,5 +466,49 @@ fn collect(taffy: &mut TaffyTree<NodeCtx>, id: taffy::NodeId, ox: f32, oy: f32) 
         children,
         src: ctx.src,
         tag: ctx.tag,
-    })
+        letter_spacing: ctx.letter_spacing,
+    };
+
+    // 计算值归一化：绘制层从 decls 重新解析 font-size/line-height（仅认 px），
+    // 将继承/倍数/百分比形态的计算值落成 px，保证绘制与布局一致
+    node.decls.insert("font-size".to_string(), format!("{}px", ctx.font_size));
+    if node.decls.contains_key("line-height") {
+        node.decls.insert("line-height".to_string(), format!("{}px", ctx.line_height));
+    }
+
+    let is_text_leaf = node.children.is_empty() && !node.text.is_empty();
+    if is_text_leaf && super::text::white_space_nowrap(&node.decls) {
+        if super::text::text_overflow_ellipsis(&node.decls) {
+            // text-overflow:ellipsis：按实际盒宽截断（含省略号），替换绘制文本
+            if node.w > 0.0 {
+                if let Some(ellipsized) = fonts.ellipsize(
+                    &node.text,
+                    ctx.font_size,
+                    ctx.weight,
+                    ctx.line_height,
+                    ctx.family.as_deref(),
+                    node.w,
+                    ctx.letter_spacing,
+                ) {
+                    node.text = ellipsized;
+                }
+            }
+        } else {
+            // 纯 nowrap：绘制层按盒宽排版，盒宽不足单行（如 max-width 钳制）时放宽到文本宽
+            let (tw, _) = fonts.measure(
+                &node.text,
+                ctx.font_size,
+                ctx.weight,
+                ctx.color,
+                None,
+                ctx.line_height,
+                ctx.family.as_deref(),
+                ctx.letter_spacing,
+            );
+            if tw > node.w {
+                node.w = tw;
+            }
+        }
+    }
+    Ok(node)
 }
