@@ -392,6 +392,15 @@ fn apply(p: &Property, basis: f32, r: &mut Resolved) {
             r.margin.bottom = tlpa(&m.bottom, basis);
             r.margin.left = tlpa(&m.left, basis);
         }
+        // margin/padding longhand（apply_styles 展开后 decls 里是分键形态，简写不会出现）
+        P::MarginTop(v) => r.margin.top = tlpa(v, basis),
+        P::MarginRight(v) => r.margin.right = tlpa(v, basis),
+        P::MarginBottom(v) => r.margin.bottom = tlpa(v, basis),
+        P::MarginLeft(v) => r.margin.left = tlpa(v, basis),
+        P::PaddingTop(v) => r.padding.top = tlpa(v, basis).into_lp(),
+        P::PaddingRight(v) => r.padding.right = tlpa(v, basis).into_lp(),
+        P::PaddingBottom(v) => r.padding.bottom = tlpa(v, basis).into_lp(),
+        P::PaddingLeft(v) => r.padding.left = tlpa(v, basis).into_lp(),
         P::Padding(pd) => {
             r.padding.top = tlpa(&pd.top, basis).into_lp();
             r.padding.right = tlpa(&pd.right, basis).into_lp();

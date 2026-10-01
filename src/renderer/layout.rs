@@ -197,7 +197,7 @@ fn style_of(n: &StyleNode, width: f32) -> (Style, Resolved) {
         gap: r.gap,
         flex_direction: r.flex_direction,
         flex_wrap: r.flex_wrap,
-        flex_basis: r.flex_basis,
+        flex_basis: if cell_grow > 0.0 { Dimension::Auto } else { r.flex_basis },
         flex_grow: if cell_grow > 0.0 { cell_grow } else { r.flex_grow },
         flex_shrink: r.flex_shrink,
         justify_content: r.justify_content,
@@ -529,6 +529,14 @@ fn collect(
         children.push(collect(taffy, c, x, y, fonts)?);
     }
     let resolved = ctx.resolved.clone();
+    if std::env::var("YZ_DEBUG_LAYOUT").is_ok() {
+        eprintln!(
+            "[layout] <{}> x={x:.0} y={y:.0} w={nw:.0} h={nh:.0} kids={} decls={:?}",
+            ctx.tag,
+            children.len(),
+            ctx.decls
+        );
+    }
     let mut node = PaintNode {
         x,
         y,
