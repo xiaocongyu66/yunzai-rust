@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use anyrender::PaintScene as _;
 use blitz_dom::{DocumentConfig, util::Color};
 use blitz_html::HtmlDocument;
 use blitz_net::Provider;
