@@ -5,6 +5,7 @@
 //! color/font-size/font-weight/text-align/line-height、img(本地路径/base64)。
 //! 入口：[`render`] — HTML 字符串 → PNG 字节。
 
+pub mod blitz_render;
 pub mod css;
 pub mod dom;
 pub mod layout;
@@ -20,7 +21,18 @@ pub mod text;
 use serde_json::Value;
 
 /// 渲染 HTML → PNG。宽度默认 720，高度按内容自适应（上限 4096）。
+/// 默认走 Blitz 引擎（stylo 样式 + taffy 布局 + vello_cpu 光栅化）；
+/// 环境变量 YZ_RENDERER=legacy 切回自研管线（差分对比用）。
 pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
+    if std::env::var("YZ_RENDERER").as_deref() == Ok("legacy") {
+        legacy_render(html, width, font_dirs, base_dir)
+    } else {
+        blitz_render::render(html, width, font_dirs, base_dir)
+    }
+}
+
+/// 旧自研管线：html5ever + 自研级联 + taffy 0.5 + cosmic-text + tiny-skia
+fn legacy_render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
     let base_path = std::path::Path::new(base_dir);
     let base_path = if base_path.is_absolute() {
         base_path.to_path_buf()
