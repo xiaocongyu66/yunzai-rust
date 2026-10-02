@@ -75,3 +75,5 @@ lto = false
 ps-anyrender = { git = "https://github.com/xiaocongyu66/ps-anyrender" }
 ps-anyrender-vello-cpu = { git = "https://github.com/xiaocongyu66/ps-anyrender" }
 ps-blitz-paint = { git = "https://github.com/xiaocongyu66/ps-blitz", branch = "v0.4.12-fix" }
+# git 源 0.4.12 的 stylo_taffy 初始化 Style 用了 clear/float 字段（feature-gated），显式开启
+ps-taffy = { version = "0.13.0", package = "ps-taffy", default-features = false, features = ["float_layout"] }
