@@ -216,8 +216,8 @@ fn style_of(n: &StyleNode, width: f32) -> (Style, Resolved) {
         style.align_self = Some(AlignItems::FlexStart);
     } else if block_flow {
         style.flex_direction = FlexDirection::Column;
-        // CSS 块布局语义：块级子项左对齐（taffy Stretch 对有显式宽度的子项回落成居中）
-        style.align_items = Some(AlignItems::FlexStart);
+        // align 保持 taffy 默认 Stretch：块级子项 width:auto 时填满容器、
+        // 有显式宽度时靠左（margin 默认已修正为 0，不再有 Auto 居中问题）
     }
     // table 容器（CSS display:table 或裸 table/thead/tbody 标签）：纵向排列行（行内 cell 横排由 table-row 的 Row 方向保证）
     let table_container = table_decl == "table"
@@ -226,6 +226,12 @@ fn style_of(n: &StyleNode, width: f32) -> (Style, Resolved) {
         style.display = Display::Flex;
         style.flex_direction = FlexDirection::Column;
         style.flex_grow = if style.flex_grow > 0.0 { style.flex_grow } else { 0.0 };
+    }
+    // table-cell：块级子元素纵向排（td 里的标题/描述竖排，不横排）
+    if table_decl == "table-cell" {
+        style.flex_direction = FlexDirection::Column;
+        // 百分比 width（如 33.33%）在 max-content 计算中循环膨胀——均分全权交给 flex_grow
+        style.size.width = Dimension::Auto;
     }
     (style, r)
 }

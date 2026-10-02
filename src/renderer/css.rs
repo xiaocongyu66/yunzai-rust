@@ -116,42 +116,70 @@ fn collect_style(st: &lightningcss::rules::style::StyleRule, ctx: &mut SheetColl
     for d in st.declarations.declarations.iter() {
         serialize_decl(d, &mut decls);
     }
-    let sel_str = st.selectors.to_css_string(lc_opts()).unwrap_or_default();
-    for one in sel_str.split(',') {
-        let one = one.trim();
-        if one.is_empty() {
-            continue;
-        }
-        let (body, which) = split_pseudo(one);
-        // :nth-child 下方剥离；其余伪类（:hover 等）不支持，跳过
-        if which.is_none() {
-            let (nth_probe, rest) = strip_nth_child(&body);
-            if nth_probe.is_none() && rest.contains(':') {
-                continue;
+    // 选择器透传：lightningcss 的结构化 Component 直读（Tag/Class/Id/组合子/nth/伪元素），
+    // 不经 to_css_string 再字符串解析
+    use lightningcss::selector::{Component, Combinator};
+use parcel_selectors::parser::NthType;
+    for sel in st.selectors.0.iter() {
+        let mut parts: Vec<super::dom::SelectorPart> = Vec::new();
+        let mut nth: Option<super::dom::NthSpec> = None;
+        let mut pseudo_elem: Option<&'static str> = None;
+        let mut unsupported = false;
+        for comp in sel.iter() {
+            match comp {
+                Component::LocalName(ln) => {
+                    let t = ln.lower_name.to_string();
+                    parts.push(super::dom::SelectorPart::Tag(t));
+                }
+                Component::ExplicitUniversalType => {
+                    parts.push(super::dom::SelectorPart::Tag("*".to_string()));
+                }
+                Component::Class(c) => {
+                    parts.push(super::dom::SelectorPart::Class(c.to_string()));
+                }
+                Component::ID(id) => {
+                    parts.push(super::dom::SelectorPart::Id(id.to_string()));
+                }
+                Component::Combinator(c) => match c {
+                    Combinator::Child => parts.push(super::dom::SelectorPart::Child),
+                    Combinator::Descendant => parts.push(super::dom::SelectorPart::Descendant),
+                    _ => unsupported = true,
+                },
+                Component::Nth(d) if matches!(d.ty, NthType::Child) => {
+                    // odd/even/an+b 解析时已归一为 (a, b)：odd=2n+1、even=2n、first-child=0n+1
+                    nth = Some(super::dom::NthSpec::AnB { a: d.a, b: d.b });
+                }
+                Component::Nth(_) => unsupported = true,
+                Component::PseudoElement(pe) => {
+                    use lightningcss::selector::PseudoElement;
+                    pseudo_elem = Some(match pe {
+                        PseudoElement::Before => "before",
+                        PseudoElement::After => "after",
+                        _ => {
+                            unsupported = true;
+                            ""
+                        }
+                    });
+                }
+                Component::NonTSPseudoClass(_) => unsupported = true,
+                _ => {}
             }
         }
-        if let Some(w) = which {
-            let (parts, _) = compile_selector(&body);
+        if unsupported || parts.is_empty() {
+            continue;
+        }
+        if let Some(w) = pseudo_elem {
             ctx.pseudos.push(PseudoRule {
                 parent: parts,
-                which: match w {
-                    "before" => "before",
-                    _ => "after",
-                },
+                which: w,
                 decls: decls.iter().cloned().collect(),
             });
             continue;
         }
-        // :nth-child(...) 从选择器串剥离，规则级保存（其余伪类仍不支持）
-        let (nth, body2) = strip_nth_child(&body);
-        if body2.contains(':') {
-            continue;
-        }
-        let (parts, spec) = compile_selector(&body2);
         ctx.rules.push(CssRule {
             selector: parts,
             decls: decls.iter().cloned().collect(),
-            specificity: spec,
+            specificity: sel.specificity() as u32,
             nth,
         });
     }
@@ -592,8 +620,13 @@ fn apply_at(node: &mut StyleNode, rules: &[CssRule], ancestors: &[NodeKey], inde
 
     let mut matched_decls: BTreeMap<String, String> = BTreeMap::new();
     for rule in rules {
-        if selector_matches(&rule.selector, ancestors, &key)
-            && rule.nth.map(|n| n.matches(key.index)).unwrap_or(true)
+        let m = selector_matches(&rule.selector, ancestors, &key);
+        let n = rule.nth.map(|x| x.matches(key.index));
+        if std::env::var("YZ_DEBUG_NTH").is_ok() && rule.nth.is_some() {
+            eprintln!("[nth] sel={:?} nth={:?} idx={} selmatch={} nthmatch={:?}",
+                rule.selector, rule.nth, key.index, m, n);
+        }
+        if m && n.unwrap_or(true)
         {
             for (k, v) in &rule.decls {
                 matched_decls.insert(k.clone(), v.clone());

@@ -3786,6 +3786,7 @@ dependencies = [
  "md-5",
  "notify",
  "once_cell",
+ "parcel_selectors",
  "redis",
  "regex",
  "reqwest",
