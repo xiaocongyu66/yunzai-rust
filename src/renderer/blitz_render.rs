@@ -66,8 +66,12 @@ async fn render_inner(
     let out_w = (layout.width.ceil() as u32).clamp(64, 4096);
     let render_height = (layout.height.ceil() as u32).clamp(1, out_w * 4);
 
-    // 白底 + 文档 → RGBA（vello_cpu 纯 CPU 光栅化）
-    let rgba = anyrender::render_to_buffer::<anyrender_vello_cpu::VelloCpuImageRenderer, _>(
+    // 2× 超采样：vello_cpu 字形/边缘 AA 为单采样，直接 1x 渲染锯齿明显；
+    // 按 2x 画完后 2×2 盒滤波降回 1x，视觉上逼近 Chrome(Skia) 的平滑度。
+    const SS: u32 = 2;
+    let ss_w = out_w * SS;
+    let ss_h = render_height * SS;
+    let rgba2 = anyrender::render_to_buffer::<anyrender_vello_cpu::VelloCpuImageRenderer, _>(
         |scene| {
             use peniko::kurbo::Rect;
             scene.fill(
@@ -75,15 +79,38 @@ async fn render_inner(
                 Default::default(),
                 Color::WHITE,
                 Default::default(),
-                &Rect::new(0.0, 0.0, width as f64, render_height as f64),
+                &Rect::new(0.0, 0.0, ss_w as f64, ss_h as f64),
             );
-            blitz_paint::paint_scene(scene, &mut *document, 1.0, width, render_height, 0, 0);
+            blitz_paint::paint_scene(scene, &mut *document, SS as f64, ss_w, ss_h, 0, 0);
         },
-        width,
-        render_height,
+        ss_w,
+        ss_h,
     );
 
-    encode_png(&rgba, width, render_height)
+    // 2×2 盒滤波降采样到输出尺寸
+    let mut rgba = vec![0u8; (out_w * render_height * 4) as usize];
+    for y in 0..render_height {
+        for x in 0..out_w {
+            let (mut r, mut g, mut b, mut a) = (0u32, 0u32, 0u32, 0u32);
+            for dy in 0..SS {
+                for dx in 0..SS {
+                    let i = (((y * SS + dy) * ss_w + x * SS + dx) * 4) as usize;
+                    r += rgba2[i] as u32;
+                    g += rgba2[i + 1] as u32;
+                    b += rgba2[i + 2] as u32;
+                    a += rgba2[i + 3] as u32;
+                }
+            }
+            let n = (SS * SS) as u32;
+            let o = ((y * out_w + x) * 4) as usize;
+            rgba[o] = (r / n) as u8;
+            rgba[o + 1] = (g / n) as u8;
+            rgba[o + 2] = (b / n) as u8;
+            rgba[o + 3] = (a / n) as u8;
+        }
+    }
+
+    encode_png(&rgba, out_w, render_height)
 }
 
 /// 字体目录注册进 Parley FontContext（模板 @font-face 由 stylo 经 net provider 自动拉取注册）
