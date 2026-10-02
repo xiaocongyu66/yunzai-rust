@@ -74,3 +74,4 @@ lto = false
 [patch.crates-io]
 ps-anyrender = { git = "https://github.com/xiaocongyu66/ps-anyrender" }
 ps-anyrender-vello-cpu = { git = "https://github.com/xiaocongyu66/ps-anyrender" }
+ps-blitz-paint = { git = "https://github.com/xiaocongyu66/ps-blitz" }
