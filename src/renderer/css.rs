@@ -399,6 +399,11 @@ fn parse_declarations_lc_important(s: &str) -> Option<(Vec<(String, String)>, Ve
 /// 单条 lightningcss 声明 → (属性名, 值) 列表（简写展开 longhand）
 pub fn serialize_decl(d: &lightningcss::properties::Property, out: &mut Vec<(String, String)>) {
     use lightningcss::properties::Property;
+    // alpha.72 对已知属性名的值解析失败时回落 Property::Unparsed（原样保留非法值，如 7 位色值）。
+    // 浏览器语义是"非法值=声明作废"——丢弃后级联与继承才能接管，否则原始值堵死继承落到近黑默认
+    if matches!(d, Property::Unparsed(_)) {
+        return;
+    }
     let name = d.property_id().name().to_string();
     match d {
         Property::Padding(r) => {
