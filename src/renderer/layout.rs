@@ -197,7 +197,7 @@ fn style_of(n: &StyleNode, width: f32) -> (Style, Resolved) {
         gap: r.gap,
         flex_direction: r.flex_direction,
         flex_wrap: r.flex_wrap,
-        flex_basis: if cell_grow > 0.0 { Dimension::Auto } else { r.flex_basis },
+        flex_basis: if cell_grow > 0.0 { Dimension::Length(0.0) } else { r.flex_basis },
         flex_grow: if cell_grow > 0.0 { cell_grow } else { r.flex_grow },
         flex_shrink: r.flex_shrink,
         justify_content: r.justify_content,
@@ -232,6 +232,13 @@ fn style_of(n: &StyleNode, width: f32) -> (Style, Resolved) {
         style.flex_direction = FlexDirection::Column;
         // 百分比 width（如 33.33%）在 max-content 计算中循环膨胀——均分全权交给 flex_grow
         style.size.width = Dimension::Auto;
+    }
+    if std::env::var("YZ_DEBUG_BG").is_ok() && !r.bg_layers.is_empty() {
+        eprintln!("[bg] <{} class={:?}> layers={:?}", n.tag, n.classes, r.bg_layers.iter().map(|l| match &l.paint {
+            super::style::BgPaint::Url(u) => format!("Url({}) size={:?} pos={:?} rep={:?}", u, l.size, l.position, l.repeat),
+            super::style::BgPaint::Color(c) => format!("Color({:?})", c),
+            _ => "other".to_string(),
+        }).collect::<Vec<_>>());
     }
     (style, r)
 }

@@ -71,8 +71,10 @@ pub fn parse_with_base(
 
     let mut rules = vec![];
     // (样式文本, 基准目录)——@font-face/@import 的 url 相对各自来源解析
-    let mut chunks: Vec<(String, String)> = Vec::new();
-    let mut link_hrefs: Vec<String> = vec![];
+    // (DOM 序号, 样式文本, 基准目录)——保持文档序级联（link 与 <style> 交错时序不能乱）
+    let mut chunks: Vec<(usize, String, String)> = Vec::new();
+    let mut pending_links: Vec<(usize, String)> = vec![];
+    let mut doc_seq: usize = 0;
     walk(&dom.document, &mut |h| {
         if let NodeData::Element { name, attrs, .. } = &h.data {
             let local = name.local.to_string();
@@ -80,7 +82,8 @@ pub fn parse_with_base(
                 "style" => {
                     let mut text = String::new();
                     collect_text(h, &mut text);
-                    chunks.push((text, base_dir.to_string()));
+                    chunks.push((doc_seq, text, base_dir.to_string()));
+                    doc_seq += 1;
                 }
                 "link" => {
                     let mut rel_ok = false;
@@ -97,7 +100,8 @@ pub fn parse_with_base(
                         }
                     }
                     if rel_ok && !href.is_empty() {
-                        link_hrefs.push(href);
+                        pending_links.push((doc_seq, href));
+                        doc_seq += 1;
                     }
                 }
                 _ => {}
@@ -105,20 +109,21 @@ pub fn parse_with_base(
         }
     });
 
-    // 外部 CSS：<link href>（art-template 已把 _res_path 替换为绝对路径）——基准目录 = css 文件所在目录
-    for href in link_hrefs {
+    // 外部 CSS：<link href>（art-template 已把 _res_path 替换为绝对路径）——按 DOM 序号插回原位
+    for (seq, href) in pending_links {
         let path = crate::renderer::media::resolve(&href, base_dir);
         if let Ok(css) = std::fs::read_to_string(&path) {
             let dir = std::path::Path::new(&path)
                 .parent()
                 .map(|d| d.display().to_string())
                 .unwrap_or_else(|| base_dir.to_string());
-            chunks.push((css, dir));
+            chunks.push((seq, css, dir));
         }
     }
+    chunks.sort_by_key(|(seq, _, _)| *seq);
 
     let (mut parsed_rules, mut font_faces, mut pseudo_rules) = (vec![], vec![], vec![]);
-    for (css_text, dir) in &chunks {
+    for (_, css_text, dir) in &chunks {
         let (r, f, p) = crate::renderer::css::parse_stylesheet_lc(css_text, dir);
         parsed_rules.extend(r);
         font_faces.extend(f);
