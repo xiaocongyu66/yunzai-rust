@@ -4,8 +4,10 @@ use crate::util;
 
 /// ≈ init.js 模块级初始化 + init() 函数
 pub fn pre_init() {
-    // 时区
-    std::env::set_var("TZ", "Asia/Shanghai");
+    // 时区（edition 2024 起 set_var 为 unsafe；pre_init 在多线程启动前执行，安全）
+    unsafe {
+        std::env::set_var("TZ", "Asia/Shanghai");
+    }
     // panic 钩子 → 错误日志（≈ uncaughtException/unhandledRejection）
     std::panic::set_hook(Box::new(|info| {
         util::make_log1(Level::Error, None, format!("uncaughtException: {}", info));

@@ -44,10 +44,11 @@ blitz-html = { version = "0.4.12", package = "ps-blitz-html", default-features =
 blitz-dom = { version = "0.4.12", package = "ps-blitz-dom", default-features = false, features = ["svg", "woff", "floats"] }
 blitz-paint = { version = "0.4.12", package = "ps-blitz-paint", default-features = false, features = ["svg"] }
 blitz-net = { version = "0.4.12", package = "ps-blitz-net", default-features = false }
+blitz-traits = { version = "0.4.12", package = "ps-blitz-traits", default-features = false }
 parley = { version = "0.10", default-features = false, features = ["std"] }
-anyrender = "0.13.0"
+anyrender = { version = "0.13.0", package = "ps-anyrender" }
 peniko = "0.6.0"
-anyrender_vello_cpu = "0.17.0"
+anyrender_vello_cpu = { version = "0.17.1", package = "ps-anyrender-vello-cpu" }
 png = "0.18"
 
 ulid = "1"
