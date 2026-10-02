@@ -45,13 +45,15 @@ async fn render_inner(
     );
 
     // 驱动资源拉取（图片/字体异步）；net.is_empty() = 无在途请求即完成。上限 30s 防死循环。
-    // 必须 await 让出线程：current-thread runtime 的 spawn 任务（fetch）依赖 poll
+    // 关键时序：resolve 触发 fetch spawn 后，异步任务尚未调度、Arc 计数未增——
+    // 立刻查 is_empty 会误判"无在途请求"导致图片全丢。先 await 一拍让任务跑起来再查。
+    document.resolve(0.0);
     for _ in 0..600 {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         document.resolve(0.0);
         if net.is_empty() {
             break;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     document.resolve(0.0);
 
