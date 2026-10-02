@@ -14,6 +14,21 @@ use blitz_traits::shell::{ColorScheme, Viewport};
 
 /// HTML → PNG 字节。宽度为视口宽，高度按根元素内容自适应（≈TRSS 截图行为）。
 pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
+    // ps-blitz-net 的 Provider::new() 要求 tokio runtime 上下文；
+    // 渲染入口是同步线程，这里套一个局部 current-thread runtime
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("tokio runtime: {e}"))?;
+    rt.block_on(render_inner(html, width, font_dirs, base_dir))
+}
+
+async fn render_inner(
+    html: &str,
+    width: u32,
+    font_dirs: &[String],
+    base_dir: &str,
+) -> Result<Vec<u8>, String> {
     let width = width.clamp(64, 4096);
     let base_url = format!("file://{}/", base_dir.trim_end_matches('/'));
     let net = Arc::new(Provider::new(None));
