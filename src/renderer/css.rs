@@ -40,10 +40,10 @@ struct SheetCollector {
 
 /// 返回 (样式规则, @font-face 列表, 伪元素规则列表)；css_dir 为该样式表的文件目录（@font-face url 基准）
 pub fn parse_stylesheet_lc(css: &str, css_dir: &str) -> (Vec<CssRule>, Vec<(String, String)>, Vec<PseudoRule>) {
-    use lightningcss::stylesheet::{ParserOptions, StyleSheet};
+    use lightningcss::stylesheet::StyleSheet;
     let mut ctx = SheetCollector::default();
     ctx.css_dir = css_dir.to_string();
-    if let Ok(ss) = StyleSheet::parse(css, ParserOptions::default()) {
+    if let Ok(ss) = StyleSheet::parse(css, lc_parse_opts()) {
         collect_rules(&ss.rules, &mut ctx, 0);
     }
     (ctx.rules, ctx.faces, ctx.pseudos)
@@ -54,7 +54,7 @@ pub fn parse_stylesheet_lc(css: &str, css_dir: &str) -> (Vec<CssRule>, Vec<(Stri
 /// @import 读本地文件后整体解析并递归（depth 上限防循环）
 fn collect_rules(list: &lightningcss::rules::CssRuleList, ctx: &mut SheetCollector, depth: u32) {
     use lightningcss::rules::CssRule as LcRule;
-    use lightningcss::stylesheet::{ParserOptions, StyleSheet};
+    use lightningcss::stylesheet::StyleSheet;
     for rule in list.0.iter() {
         match rule {
             LcRule::Style(st) => collect_style(st, ctx),
@@ -70,7 +70,7 @@ fn collect_rules(list: &lightningcss::rules::CssRuleList, ctx: &mut SheetCollect
                 if depth < MAX_IMPORT_DEPTH {
                     if let Some((css, sub_dir)) = read_import_source(&i.url.to_string(), &ctx.css_dir) {
                         let prev = std::mem::replace(&mut ctx.css_dir, sub_dir);
-                        if let Ok(ss) = StyleSheet::parse(&css, ParserOptions::default()) {
+                        if let Ok(ss) = StyleSheet::parse(&css, lc_parse_opts()) {
                             collect_rules(&ss.rules, ctx, depth + 1);
                         }
                         ctx.css_dir = prev;
@@ -117,12 +117,20 @@ impl<'i> lightningcss::visitor::Visitor<'i> for StylesheetUrls<'_> {
 fn collect_style(st: &lightningcss::rules::style::StyleRule, ctx: &mut SheetCollector) {
     use lightningcss::traits::ToCss;
     let mut decls: Vec<(String, String)> = Vec::new();
+    let mut idecls: Vec<(String, String)> = Vec::new();
     use lightningcss::visitor::Visit;
     let mut urls = StylesheetUrls { base: &ctx.css_dir };
     for d in st.declarations.declarations.iter() {
         let mut d = d.clone();
         match d.visit(&mut urls) {
             Ok(()) => serialize_decl(&d, &mut decls),
+            Err(never) => match never {},
+        }
+    }
+    for d in st.declarations.important_declarations.iter() {
+        let mut d = d.clone();
+        match d.visit(&mut urls) {
+            Ok(()) => serialize_decl(&d, &mut idecls),
             Err(never) => match never {},
         }
     }
@@ -141,17 +149,22 @@ use parcel_selectors::parser::NthType;
             continue;
         };
         let specificity = sel.specificity();
+        let mut pseudo_decls: BTreeMap<String, String> = decls.iter().cloned().collect();
+        for (k, v) in &idecls {
+            pseudo_decls.insert(k.clone(), v.clone());
+        }
         if let Some(w) = which {
             ctx.pseudos.push(PseudoRule {
                 parent: sel,
                 which: w,
-                decls: decls.iter().cloned().collect(),
+                decls: pseudo_decls,
             });
             continue;
         }
         ctx.rules.push(CssRule {
             selector: sel,
             decls: decls.iter().cloned().collect(),
+            important_decls: idecls.iter().cloned().collect(),
             specificity,
         });
     }
@@ -228,11 +241,20 @@ pub fn apply_pseudo(root: &mut StyleNode, rules: &[PseudoRule]) {
             id: None,
             classes: Vec::new(),
             decls: r.decls.clone(),
+            important_decls: BTreeMap::new(),
             text: content,
             children: Vec::new(),
             src: None,
         };
         child.decls.remove("content");
+        // 伪元素继承宿主元素的可继承属性（CSS：::before/::after 从 originating element 继承）
+        for k in INHERITED_PROPS {
+            if !child.decls.contains_key(*k) {
+                if let Some(v) = n.decls.get(*k) {
+                    child.decls.insert((*k).to_string(), v.clone());
+                }
+            }
+        }
         if is_before {
             n.children.insert(0, child);
         } else {
@@ -309,6 +331,14 @@ pub fn parse_declarations(s: &str) -> Vec<(String, String)> {
     }
 }
 
+/// 解析声明块：返回 (普通声明, !important 声明)。legacy 回退时重要声明并入普通。
+pub fn parse_declarations_important(s: &str) -> (Vec<(String, String)>, Vec<(String, String)>) {
+    match parse_declarations_lc_important(s) {
+        Some((n, i)) if !n.is_empty() || !i.is_empty() => (n, i),
+        _ => (parse_declarations_legacy(s), Vec::new()),
+    }
+}
+
 fn parse_declarations_legacy(s: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for decl in split_top(s, ';') {
@@ -327,9 +357,9 @@ fn parse_declarations_legacy(s: &str) -> Vec<(String, String)> {
 fn parse_declarations_lc(s: &str) -> Option<Vec<(String, String)>> {
     use lightningcss::printer::PrinterOptions;
     use lightningcss::properties::Property;
-    use lightningcss::stylesheet::{ParserOptions, StyleSheet};
+    use lightningcss::stylesheet::StyleSheet;
     let src = format!("a{{ {} }}", s);
-    let mut ss = StyleSheet::parse(&src, ParserOptions::default()).ok()?;
+    let mut ss = StyleSheet::parse(&src, lc_parse_opts()).ok()?;
     let rule = ss.rules.0.first_mut()?;
     let style = match rule {
         lightningcss::rules::CssRule::Style(st) => st,
@@ -339,7 +369,31 @@ fn parse_declarations_lc(s: &str) -> Option<Vec<(String, String)>> {
     for decl in style.declarations.declarations.iter() {
         serialize_decl(decl, &mut out);
     }
+    for decl in style.declarations.important_declarations.iter() {
+        serialize_decl(decl, &mut out);
+    }
     Some(out)
+}
+
+/// Lightning CSS 解析：结构化声明 → (普通, 重要) 两张 longhand 字符串表
+fn parse_declarations_lc_important(s: &str) -> Option<(Vec<(String, String)>, Vec<(String, String)>)> {
+    use lightningcss::stylesheet::StyleSheet;
+    let src = format!("a{{ {} }}", s);
+    let mut ss = StyleSheet::parse(&src, lc_parse_opts()).ok()?;
+    let rule = ss.rules.0.first_mut()?;
+    let style = match rule {
+        lightningcss::rules::CssRule::Style(st) => st,
+        _ => return None,
+    };
+    let mut normal = Vec::new();
+    for decl in style.declarations.declarations.iter() {
+        serialize_decl(decl, &mut normal);
+    }
+    let mut important = Vec::new();
+    for decl in style.declarations.important_declarations.iter() {
+        serialize_decl(decl, &mut important);
+    }
+    Some((normal, important))
 }
 
 /// 单条 lightningcss 声明 → (属性名, 值) 列表（简写展开 longhand）
@@ -360,13 +414,18 @@ pub fn serialize_decl(d: &lightningcss::properties::Property, out: &mut Vec<(Str
             out.push(("margin-left".into(), lc_val(&r.left)));
         }
         Property::Background(list) => {
-            for b in list {
-                out.push(("background-image".into(), lc_val(&b.image)));
-                out.push(("background-color".into(), lc_val(&b.color)));
-                out.push(("background-position".into(), lc_val(&b.position)));
-                out.push(("background-size".into(), lc_val(&b.size)));
-                out.push(("background-repeat".into(), lc_val(&b.repeat)));
+            // 多层背景：每层值逗号连接（CSS 规范；background-color 仅取最后一层）
+            let images: Vec<String> = list.iter().map(|b| lc_val(&b.image)).collect();
+            out.push(("background-image".into(), images.join(", ")));
+            if let Some(last) = list.last() {
+                out.push(("background-color".into(), lc_val(&last.color)));
             }
+            let positions: Vec<String> = list.iter().map(|b| lc_val(&b.position)).collect();
+            out.push(("background-position".into(), positions.join(", ")));
+            let sizes: Vec<String> = list.iter().map(|b| lc_val(&b.size)).collect();
+            out.push(("background-size".into(), sizes.join(", ")));
+            let repeats: Vec<String> = list.iter().map(|b| lc_val(&b.repeat)).collect();
+            out.push(("background-repeat".into(), repeats.join(", ")));
         }
         Property::Gap(g) => {
             out.push(("row-gap".into(), lc_val(&g.row)));
@@ -481,6 +540,15 @@ fn lc_val<T: lightningcss::traits::ToCss>(v: &T) -> String {
     v.to_css_string(lc_opts()).unwrap_or_default()
 }
 
+/// 解析选项：错误恢复开启（浏览器语义）——单条非法声明仅该条被丢弃，
+/// 不再使整个样式表解析失败（曾导致一张无效色值废掉整页样式）
+fn lc_parse_opts<'i>() -> lightningcss::stylesheet::ParserOptions<'i, 'static> {
+    lightningcss::stylesheet::ParserOptions {
+        error_recovery: true,
+        ..Default::default()
+    }
+}
+
 
 /// 括号感知的顶层分割（linear-gradient(a,b) 内的 ; 逗号不切）
 fn split_top(s: &str, sep: char) -> Vec<String> {
@@ -515,16 +583,18 @@ pub fn split_commas(s: &str) -> Vec<String> {
 /// 样式匹配：规则表应用到节点树（specificity 升序应用，inline 已在 decls 中最高优先）
 pub fn apply_styles(mut root: StyleNode, rules: &[CssRule]) -> StyleNode {
     // 两遍法（Servo 风格解耦匹配与修改）：
-    // 1) 不可变遍历：EWrap 链 + matches_selector 收集 (索引路径, 级联声明)
-    // 2) 可变遍历：按路径回填（inline style 已在 decls 中最后覆盖）
-    let mut collected: Vec<(Vec<usize>, BTreeMap<String, String>)> = Vec::new();
+    // 1) 不可变遍历：EWrap 链 + matches_selector 收集 (索引路径, 普通/重要级联声明)
+    // 2) 可变遍历：按路径回填。级联序：样式表普通 < inline 普通 < 样式表 !important < inline !important
+    //    （同级内部按 specificity 与文档序）
+    let mut collected: Vec<(Vec<usize>, BTreeMap<String, String>, BTreeMap<String, String>)> = Vec::new();
     {
         let ew = Rc::new(EWrap { node: &root, parent: None, index: 0 });
         collect_at(&root, rules, Some(ew.clone()), 0, &mut Vec::new(), &mut collected);
     }
-    for (path, decls) in collected {
+    for (path, decls, idecls) in collected {
         let Some(n) = node_at_mut(&mut root, &path) else { continue };
-        let inline = n.decls.clone();
+        let inline = std::mem::take(&mut n.decls);
+        let inline_important = std::mem::take(&mut n.important_decls);
         n.decls.clear();
         for (k, v) in decls {
             n.decls.insert(k, v);
@@ -532,8 +602,63 @@ pub fn apply_styles(mut root: StyleNode, rules: &[CssRule]) -> StyleNode {
         for (k, v) in inline {
             n.decls.insert(k, v);
         }
+        for (k, v) in idecls {
+            n.decls.insert(k, v);
+        }
+        for (k, v) in inline_important {
+            n.decls.insert(k, v);
+        }
     }
+    apply_inheritance(&mut root, None);
     root
+}
+
+/// 可继承属性（CSS inheritance）：级联后自顶向下传播，子节点未声明时取父级计算值
+const INHERITED_PROPS: &[&str] = &[
+    "color", "font-family", "font-size", "font-weight", "font-style", "line-height",
+    "letter-spacing", "text-align", "text-indent", "text-shadow", "white-space",
+    "word-spacing", "visibility",
+];
+
+fn apply_inheritance(n: &mut StyleNode, parent: Option<&BTreeMap<String, String>>) {
+    let mut computed: BTreeMap<String, String> = BTreeMap::new();
+    if let Some(p) = parent {
+        for k in INHERITED_PROPS {
+            if let Some(v) = p.get(*k) {
+                computed.insert((*k).to_string(), v.clone());
+            }
+        }
+    }
+    let mut to_remove: Vec<&str> = Vec::new();
+    for k in INHERITED_PROPS {
+        match n.decls.get(*k) {
+            None => {
+                if let Some(v) = computed.get(*k) {
+                    n.decls.insert((*k).to_string(), v.clone());
+                }
+            }
+            Some(v) if v.trim() == "inherit" => {
+                if let Some(pv) = computed.get(*k) {
+                    n.decls.insert((*k).to_string(), pv.clone());
+                }
+            }
+            Some(v) if matches!(v.trim(), "unset" | "initial" | "revert") => {
+                to_remove.push(*k);
+            }
+            Some(_) => {}
+        }
+    }
+    for k in to_remove {
+        n.decls.remove(k);
+    }
+    for k in INHERITED_PROPS {
+        if let Some(v) = n.decls.get(*k) {
+            computed.insert((*k).to_string(), v.clone());
+        }
+    }
+    for c in n.children.iter_mut() {
+        apply_inheritance(c, Some(&computed));
+    }
 }
 
 fn node_at_mut<'n>(n: &'n mut StyleNode, path: &[usize]) -> Option<&'n mut StyleNode> {
@@ -560,21 +685,25 @@ fn collect_at<'a>(
     let ew = Rc::new(EWrap { node: node_static, parent: parent_static, index });
     let mut ctx = MatchingContext::new(MatchingMode::Normal, None, None, QuirksMode::NoQuirks);
 
-    let mut matched: Vec<(u32, usize, &BTreeMap<String, String>)> = Vec::new();
+    let mut matched: Vec<(u32, usize, &BTreeMap<String, String>, &BTreeMap<String, String>)> = Vec::new();
     for (ri, rule) in rules.iter().enumerate() {
         if sel_matches(&rule.selector, &ew, &mut ctx) {
-            matched.push((rule.specificity, ri, &rule.decls));
+            matched.push((rule.specificity, ri, &rule.decls, &rule.important_decls));
         }
     }
     if !matched.is_empty() {
-        matched.sort_by_key(|(sp, ri, _)| (*sp, *ri));
+        matched.sort_by_key(|(sp, ri, _, _)| (*sp, *ri));
         let mut cascaded = BTreeMap::new();
-        for (_, _, decls) in &matched {
+        let mut cascaded_important = BTreeMap::new();
+        for (_, _, decls, idecls) in &matched {
             for (k, v) in decls.iter() {
                 cascaded.insert(k.clone(), v.clone());
             }
+            for (k, v) in idecls.iter() {
+                cascaded_important.insert(k.clone(), v.clone());
+            }
         }
-        out.push((path.clone(), cascaded));
+        out.push((path.clone(), cascaded, cascaded_important));
     }
     for (i, c) in node.children.iter().enumerate() {
         path.push(i);
@@ -606,4 +735,85 @@ pub fn apply_font_aliases(
         *c = apply_font_aliases(std::mem::take(c), fonts);
     }
     n
+}
+
+#[cfg(test)]
+mod cascade_tests {
+    use super::super::dom::{parse, StyleNode};
+    use super::*;
+
+    fn styled(html: &str) -> StyleNode {
+        let (root, rules, _, _) = parse(html).unwrap();
+        apply_styles(root, &rules)
+    }
+
+    fn find_class<'a>(n: &'a StyleNode, cls: &str) -> Option<&'a StyleNode> {
+        if n.classes.iter().any(|c| c == cls) {
+            return Some(n);
+        }
+        n.children.iter().find_map(|c| find_class(c, cls))
+    }
+
+    fn rgb(s: &str) -> [u8; 4] {
+        crate::renderer::paint::parse_color(s).unwrap()
+    }
+
+    #[test]
+    fn specificity_beats_source_order() {
+        let n = styled(r#"<style>div{color:red}.title{color:green}</style><div class="title">x</div>"#);
+        assert_eq!(rgb(n.decl("color").unwrap()), [0, 128, 0, 255]);
+    }
+
+    #[test]
+    fn stylesheet_important_beats_inline_and_specificity() {
+        let n = styled(
+            r#"<style>.a{color:red}div{color:green !important}</style><div class="a" style="color:blue">x</div>"#,
+        );
+        assert_eq!(rgb(n.decl("color").unwrap()), [0, 128, 0, 255]);
+    }
+
+    #[test]
+    fn inline_important_beats_stylesheet_important() {
+        let n = styled(
+            r#"<style>div{color:red !important}</style><div style="color:blue !important">x</div>"#,
+        );
+        assert_eq!(rgb(n.decl("color").unwrap()), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn color_and_font_inherit_to_descendants() {
+        let html = r#"<style>body{color:#ffffff;font-family:Miao;font-size:14px}</style><div><span class="t">x</span></div>"#;
+        let n = styled(html);
+        let span = find_class(&n, "t").unwrap();
+        assert_eq!(rgb(span.decl("color").unwrap()), [255, 255, 255, 255]);
+        assert_eq!(span.decl("font-family").unwrap().trim_matches('"'), "Miao");
+        assert_eq!(span.decl("font-size").unwrap(), "14px");
+    }
+
+    #[test]
+    fn invalid_hex_color_does_not_become_black() {
+        let n = styled(r#"<style>body{color:#ffffff}div{color:#0000000}</style><div>x</div>"#);
+        assert_eq!(rgb(n.decl("color").unwrap()), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn multi_layer_background_preserved() {
+        let decls = parse_declarations("background: url(a.png) no-repeat, url(b.png) repeat-x");
+        let mut n = StyleNode::default();
+        for (k, v) in decls {
+            n.decls.insert(k, v);
+        }
+        let r = crate::renderer::style::resolve(&n, 100.0);
+        assert_eq!(r.bg_layers.len(), 2);
+        assert!(matches!(r.bg_layers[0].paint, crate::renderer::style::BgPaint::Url(_)));
+        assert!(matches!(r.bg_layers[1].paint, crate::renderer::style::BgPaint::Url(_)));
+    }
+
+    #[test]
+    fn important_split_on_inline_parse() {
+        let (normal, important) = parse_declarations_important("color: red; width: 10px !important");
+        assert!(normal.iter().any(|(k, _)| k == "color"));
+        assert!(important.iter().any(|(k, v)| k == "width" && v == "10px"));
+        assert!(!important.iter().any(|(k, _)| k == "color"));
+    }
 }

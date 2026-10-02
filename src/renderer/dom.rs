@@ -10,8 +10,10 @@ pub struct StyleNode {
     pub tag: String,
     pub id: Option<String>,
     pub classes: Vec<String>,
-    /// 合并后的声明（inline 优先）
+    /// 合并后的声明（级联前为 inline 普通声明，级联后为计算值）
     pub decls: BTreeMap<String, String>,
+    /// inline !important 声明（级联时优先于样式表普通声明）
+    pub important_decls: BTreeMap<String, String>,
     /// 文本叶子节点的内容
     pub text: String,
     pub children: Vec<StyleNode>,
@@ -42,6 +44,7 @@ pub struct CssRule {
     /// parcel_selectors 结构化选择器（Servo 同款匹配，nth/组合子全由其处理）
     pub selector: crate::renderer::matcher::SelSelector,
     pub decls: BTreeMap<String, String>,
+    pub important_decls: BTreeMap<String, String>,
     pub specificity: u32,
 }
 
@@ -190,8 +193,12 @@ fn build(h: &Handle) -> StyleNode {
             }
         }
         if let Some(sv) = style_attr {
-            for (dk, dv) in crate::renderer::css::parse_declarations(&sv) {
+            let (normal, important) = crate::renderer::css::parse_declarations_important(&sv);
+            for (dk, dv) in normal {
                 node.decls.insert(dk, dv);
+            }
+            for (dk, dv) in important {
+                node.important_decls.insert(dk, dv);
             }
         }
     }
