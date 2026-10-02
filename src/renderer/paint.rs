@@ -414,6 +414,18 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, r: &Resolved, opacity: f32, fon
     let lh = line_height_px(r);
     let family = r.font_family.as_deref();
     let main_color = mul_alpha(r.color, opacity);
+    if std::env::var("YZ_DEBUG_TEXT").is_ok() {
+        eprintln!("[text] <{}> x={:.0} y={:.0} w={:.0} color={:?} t={:?}", n.tag, n.x, n.y, n.w, r.color, n.text.chars().take(36).collect::<String>());
+    }
+
+    // 对齐偏移（正文与 text-shadow 共用；CSS：阴影随文字一起对齐）
+    let align_off = |lw: f32| -> f32 {
+        match n.text_align {
+            TextAlign::Center => ((n.w - lw) / 2.0).max(0.0),
+            TextAlign::Right => (n.w - lw).max(0.0),
+            TextAlign::Left => 0.0,
+        }
+    };
 
     // text-shadow（全部层，先于正文；CSS 中阴影绘制在文字之下）
     for s in &r.text_shadows {
@@ -429,7 +441,8 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, r: &Resolved, opacity: f32, fon
             n.text_align,
             family,
         );
-        let bx = (n.x + s.x).round() as i32;
+        let s_off = align_off(max_run_w(&buffer_s));
+        let bx = (n.x + s.x + s_off).round() as i32;
         let by = (n.y + s.y).round() as i32;
         super::text::draw_with_letter_spacing(&buffer_s, fonts, cosmic_text_color(sc), r.letter_spacing, |gx, gy, gw, gh, col| {
             let px = bx + gx;
@@ -453,20 +466,12 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, r: &Resolved, opacity: f32, fon
         n.text_align,
         family,
     );
-    // 水平对齐偏移：逐行用本行 line_w（用整段最宽行会让短行错位）；
-    // 绘制走全局 buffer.draw（LayoutRun 无 draw 方法），以最宽行近似
+    // 水平对齐偏移：逐行用本行 line_w（用整段最宽行会让短行错位）
     let runs_info: Vec<(f32, f32)> = buffer
         .layout_runs()
         .map(|run| (run.line_w, run.line_top))
         .collect();
-    let max_w = runs_info.iter().map(|(w, _)| *w).fold(0f32, f32::max);
-    let align_off = |lw: f32| -> f32 {
-        match n.text_align {
-            TextAlign::Center => ((n.w - lw) / 2.0).max(0.0),
-            TextAlign::Right => (n.w - lw).max(0.0),
-            TextAlign::Left => 0.0,
-        }
-    };
+    let max_w = max_run_w(&buffer);
     // text-indent：首行缩进（多行段落的首行定位需逐行偏移，暂在单行场景生效）
     let mut dx = align_off(max_w);
     if runs_info.len() <= 1 {
@@ -485,6 +490,14 @@ fn draw_text(pixmap: &mut Pixmap, n: &PaintNode, r: &Resolved, opacity: f32, fon
             }
         }
     });
+}
+
+/// buffer 的最宽行宽（正文与 shadow 的对齐偏移共用）
+fn max_run_w(buffer: &cosmic_text::Buffer) -> f32 {
+    buffer
+        .layout_runs()
+        .map(|run| run.line_w)
+        .fold(0f32, f32::max)
 }
 
 /// 行高 px：LineH::Px 直取；Mult × font-size；未声明 = font-size × 1.5
