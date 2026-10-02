@@ -139,8 +139,9 @@ fn collect_style(st: &lightningcss::rules::style::StyleRule, ctx: &mut SheetColl
     use lightningcss::selector::{Component, Combinator};
 use parcel_selectors::parser::NthType;
     // 选择器解析：lightningcss 序列化字符串 → parcel 标准解析器（Servo 同款匹配链）
-    let sel_str = st.selectors.to_css_string(lc_opts()).unwrap_or_default();
-    for one in sel_str.split(',') {
+    // 选择器列表逐项遍历（此前字符串 split(',') 会把 :is(a, b)/:not(a, b) 内部逗号误切）
+    for sel_item in st.selectors.0.iter() {
+        let one = sel_item.to_css_string(lc_opts()).unwrap_or_default();
         let one = one.trim();
         if one.is_empty() {
             continue;
@@ -149,6 +150,12 @@ use parcel_selectors::parser::NthType;
             continue;
         };
         let specificity = sel.specificity();
+        css_debug(format!(
+            "规则 {one} sp={specificity} 普通={} 重要={} 伪元素={}",
+            decls.len(),
+            idecls.len(),
+            which.is_some()
+        ));
         let mut pseudo_decls: BTreeMap<String, String> = decls.iter().cloned().collect();
         for (k, v) in &idecls {
             pseudo_decls.insert(k.clone(), v.clone());
@@ -396,12 +403,28 @@ fn parse_declarations_lc_important(s: &str) -> Option<(Vec<(String, String)>, Ve
     Some((normal, important))
 }
 
+/// CSS 诊断日志（YZ_DEBUG_CSS 开启时输出逐环节明细：收集/丢弃/命中/消费/继承）
+static CSS_DEBUG: once_cell::sync::Lazy<bool> =
+    once_cell::sync::Lazy::new(|| std::env::var("YZ_DEBUG_CSS").is_ok());
+
+pub fn css_debug(msg: String) {
+    if *CSS_DEBUG {
+        eprintln!("[css] {msg}");
+    }
+}
+
 /// 单条 lightningcss 声明 → (属性名, 值) 列表（简写展开 longhand）
 pub fn serialize_decl(d: &lightningcss::properties::Property, out: &mut Vec<(String, String)>) {
     use lightningcss::properties::Property;
-    // alpha.72 对已知属性名的值解析失败时回落 Property::Unparsed（原样保留非法值，如 7 位色值）。
-    // 浏览器语义是"非法值=声明作废"——丢弃后级联与继承才能接管，否则原始值堵死继承落到近黑默认
-    if matches!(d, Property::Unparsed(_)) {
+    // alpha.72 对已知属性名的值解析失败时回落 Property::Unparsed。浏览器语义：
+    // 非法值=声明作废（丢弃，级联/继承接管）；CSS 宽关键字值保留交由继承计算处理
+    if let Property::Unparsed(u) = d {
+        let kw = d.value_to_css_string(lc_opts()).unwrap_or_default().trim().to_lowercase();
+        if matches!(kw.as_str(), "inherit" | "initial" | "unset" | "revert") {
+            out.push((u.property_id.name().to_string(), kw));
+        } else {
+            css_debug(format!("丢弃未解析声明 {}：{}", u.property_id.name(), kw));
+        }
         return;
     }
     let name = d.property_id().name().to_string();
@@ -614,7 +637,7 @@ pub fn apply_styles(mut root: StyleNode, rules: &[CssRule]) -> StyleNode {
             n.decls.insert(k, v);
         }
     }
-    apply_inheritance(&mut root, None);
+    apply_inheritance(&mut root, None, None);
     root
 }
 
@@ -625,36 +648,49 @@ const INHERITED_PROPS: &[&str] = &[
     "word-spacing", "visibility",
 ];
 
-fn apply_inheritance(n: &mut StyleNode, parent: Option<&BTreeMap<String, String>>) {
+fn apply_inheritance(
+    n: &mut StyleNode,
+    parent_inherited: Option<&BTreeMap<String, String>>,
+    parent_all: Option<&BTreeMap<String, String>>,
+) {
     let mut computed: BTreeMap<String, String> = BTreeMap::new();
-    if let Some(p) = parent {
+    if let Some(p) = parent_inherited {
         for k in INHERITED_PROPS {
             if let Some(v) = p.get(*k) {
                 computed.insert((*k).to_string(), v.clone());
             }
         }
     }
-    let mut to_remove: Vec<&str> = Vec::new();
-    for k in INHERITED_PROPS {
-        match n.decls.get(*k) {
-            None => {
-                if let Some(v) = computed.get(*k) {
-                    n.decls.insert((*k).to_string(), v.clone());
-                }
+    // CSS 宽关键字（全属性）：inherit=取父级计算值；unset/revert 在可继承属性上等同
+    // inherit、其余属性上等同 initial；initial=回到初始值（删声明走默认）
+    let mut copies: Vec<(String, String)> = Vec::new();
+    let mut to_remove: Vec<String> = Vec::new();
+    for (k, v) in n.decls.iter() {
+        let kw = v.trim();
+        let takes_parent = kw == "inherit"
+            || ((kw == "unset" || kw == "revert") && INHERITED_PROPS.contains(&k.as_str()));
+        if takes_parent {
+            match parent_all.and_then(|p| p.get(k)) {
+                Some(pv) => copies.push((k.clone(), pv.clone())),
+                None => to_remove.push(k.clone()),
             }
-            Some(v) if v.trim() == "inherit" => {
-                if let Some(pv) = computed.get(*k) {
-                    n.decls.insert((*k).to_string(), pv.clone());
-                }
-            }
-            Some(v) if matches!(v.trim(), "unset" | "initial" | "revert") => {
-                to_remove.push(*k);
-            }
-            Some(_) => {}
+        } else if kw == "unset" || kw == "revert" || kw == "initial" {
+            to_remove.push(k.clone());
         }
     }
     for k in to_remove {
-        n.decls.remove(k);
+        n.decls.remove(&k);
+    }
+    for (k, v) in copies {
+        n.decls.insert(k, v);
+    }
+    for k in INHERITED_PROPS {
+        if n.decls.get(*k).is_none() {
+            if let Some(v) = computed.get(*k) {
+                n.decls.insert((*k).to_string(), v.clone());
+                css_debug(format!("继承 <{} class={:?}> ← {k}: {v}", n.tag, n.classes));
+            }
+        }
     }
     for k in INHERITED_PROPS {
         if let Some(v) = n.decls.get(*k) {
@@ -662,7 +698,7 @@ fn apply_inheritance(n: &mut StyleNode, parent: Option<&BTreeMap<String, String>
         }
     }
     for c in n.children.iter_mut() {
-        apply_inheritance(c, Some(&computed));
+        apply_inheritance(c, Some(&computed), Some(&n.decls));
     }
 }
 
@@ -698,6 +734,13 @@ fn collect_at<'a>(
     }
     if !matched.is_empty() {
         matched.sort_by_key(|(sp, ri, _, _)| (*sp, *ri));
+        css_debug(format!(
+            "命中 <{} class={:?}> {} 条规则 {}",
+            node.tag,
+            node.classes,
+            matched.len(),
+            matched.iter().map(|(_, ri, _, _)| ri.to_string()).collect::<Vec<_>>().join(",")
+        ));
         let mut cascaded = BTreeMap::new();
         let mut cascaded_important = BTreeMap::new();
         for (_, _, decls, idecls) in &matched {
@@ -819,6 +862,18 @@ mod cascade_tests {
         assert_eq!(r.bg_layers.len(), 2);
         assert!(matches!(r.bg_layers[0].paint, crate::renderer::style::BgPaint::Url(_)));
         assert!(matches!(r.bg_layers[1].paint, crate::renderer::style::BgPaint::Url(_)));
+    }
+
+    #[test]
+    fn explicit_inherit_on_non_inherited_property() {
+        let n = styled(r#"<style>body{height:40px}div{height:inherit}</style><div>x</div>"#);
+        assert_eq!(find_tag(&n, "div").unwrap().decl("height").unwrap(), "40px");
+    }
+
+    #[test]
+    fn unset_on_inherited_property_takes_parent() {
+        let n = styled(r#"<style>body{color:#ffffff}div{color:unset}</style><div>x</div>"#);
+        assert_eq!(rgb(find_tag(&n, "div").unwrap().decl("color").unwrap()), [255, 255, 255, 255]);
     }
 
     #[test]

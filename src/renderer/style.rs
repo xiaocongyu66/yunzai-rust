@@ -369,8 +369,12 @@ impl Default for Resolved {
 pub fn resolve(n: &StyleNode, width: f32) -> Resolved {
     let mut r = Resolved::default();
     for (k, v) in n.decls.iter() {
-        if let Some(p) = parse_prop(k, v) {
-            apply(&p, width, &mut r);
+        match parse_prop(k, v) {
+            Some(p) => apply(&p, width, &mut r),
+            None => crate::renderer::css::css_debug(format!(
+                "未消费 <{} class={:?}> {k}: {v}",
+                n.tag, n.classes
+            )),
         }
     }
     // 边框宽度收口：style none/hidden 的侧边按 0（声明字典为字母序，style 恒先于 width 出现）
