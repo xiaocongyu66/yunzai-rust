@@ -44,7 +44,7 @@ async fn render_inner(
         },
     );
 
-    // 驱动资源拉取（图片/字体异步）；net.is_empty() = 无在途请求即完成。上限防死循环。
+    // 驱动资源拉取（图片/字体异步）；net.is_empty() = 无在途请求即完成。上限 30s 防死循环。
     // 必须 await 让出线程：current-thread runtime 的 spawn 任务（fetch）依赖 poll
     for _ in 0..600 {
         document.resolve(0.0);
@@ -55,8 +55,10 @@ async fn render_inner(
     }
     document.resolve(0.0);
 
-    let content_height = document.root_element().final_layout().size.height;
-    let render_height = (content_height.ceil() as u32).clamp(1, width * 4);
+    // ≈ TRSS 按根元素实际尺寸截图：输出宽高取内容边界（防视口留白）
+    let layout = document.root_element().final_layout().size;
+    let out_w = (layout.width.ceil() as u32).clamp(64, 4096);
+    let render_height = (layout.height.ceil() as u32).clamp(1, out_w * 4);
 
     // 白底 + 文档 → RGBA（vello_cpu 纯 CPU 光栅化）
     let rgba = anyrender::render_to_buffer::<anyrender_vello_cpu::VelloCpuImageRenderer, _>(
