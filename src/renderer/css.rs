@@ -279,12 +279,8 @@ fn collect_pseudo_at<'a>(
     out: &mut Vec<(Vec<usize>, bool, PseudoRule)>,
 ) {
     use super::matcher::matches as sel_matches;
-    // SAFETY：同 collect_at——匹配只读、引用不外泄
-    let node_static: &'static StyleNode = unsafe { std::mem::transmute::<&StyleNode, &'static StyleNode>(node) };
-    let parent_static: Option<Rc<EWrap<'static>>> = unsafe {
-        std::mem::transmute::<Option<Rc<EWrap>>, Option<Rc<EWrap<'static>>>>(parent)
-    };
-    let ew = Rc::new(EWrap { node: node_static, parent: parent_static, index });
+    // 生命周期已解耦（SelImpl 关联类型无生命周期依赖），无需再强转 'static
+    let ew = Rc::new(EWrap { node, parent, index });
     let mut ctx = MatchingContext::new(MatchingMode::Normal, None, None, QuirksMode::NoQuirks);
     for r in rules {
         if sel_matches(&r.parent, &ew, &mut ctx) {
@@ -717,13 +713,8 @@ fn collect_at<'a>(
     out: &mut Vec<(Vec<usize>, BTreeMap<String, String>, BTreeMap<String, String>)>,
 ) {
     use super::matcher::matches as sel_matches;
-    // SAFETY：匹配阶段为只读，且 'static 引用不逃逸出本函数（out 仅存路径与声明的拷贝）；
-    // StyleNode 树由调用方持有，生命周期覆盖整个匹配过程。
-    let node_static: &'static StyleNode = unsafe { std::mem::transmute::<&StyleNode, &'static StyleNode>(node) };
-    let parent_static: Option<Rc<EWrap<'static>>> = unsafe {
-        std::mem::transmute::<Option<Rc<EWrap>>, Option<Rc<EWrap<'static>>>>(parent)
-    };
-    let ew = Rc::new(EWrap { node: node_static, parent: parent_static, index });
+    // 生命周期已解耦（SelImpl 关联类型无生命周期依赖），匹配阶段直接借用样式树，无需强转 'static
+    let ew = Rc::new(EWrap { node, parent, index });
     let mut ctx = MatchingContext::new(MatchingMode::Normal, None, None, QuirksMode::NoQuirks);
 
     let mut matched: Vec<(u32, usize, &BTreeMap<String, String>, &BTreeMap<String, String>)> = Vec::new();

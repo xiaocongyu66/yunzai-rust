@@ -182,22 +182,23 @@ impl<'a> EWrap<'a> {
 }
 
 /// 匹配入口：selector 是否命中 node（wrap 需由调用方沿树构建，保证父链完整）
-pub fn matches<'i, 'e, 'c>(
+/// 生命周期解耦：'i 为选择器数据生命周期，'a 为样式树借用生命周期（SelImpl 关联类型均无生命周期依赖）
+pub fn matches<'i, 'e, 'c, 'a>(
     selector: &'e Selector<'i, SelImpl>,
-    wrap: &'e EWrap<'i>,
+    wrap: &'e EWrap<'a>,
     ctx: &mut MatchingContext<'c, 'i, SelImpl>,
 ) -> bool {
     matches_selector(selector, 0, None, wrap, ctx, &mut |_, _| {})
 }
 
-impl<'i> Element<'i> for EWrap<'i> {
+impl<'i, 'a> Element<'i> for EWrap<'a> {
     type Impl = SelImpl;
 
     fn opaque(&self) -> OpaqueElement {
         OpaqueElement::new(self.node)
     }
 
-    fn parent_element(&self) -> Option<EWrap<'i>> {
+    fn parent_element(&self) -> Option<EWrap<'a>> {
         self.parent.as_ref().map(|p| EWrap {
             node: p.node,
             parent: p.parent.clone(),
@@ -209,7 +210,7 @@ impl<'i> Element<'i> for EWrap<'i> {
         false
     }
 
-    fn containing_shadow_host(&self) -> Option<EWrap<'i>> {
+    fn containing_shadow_host(&self) -> Option<EWrap<'a>> {
         None
     }
 
@@ -217,13 +218,13 @@ impl<'i> Element<'i> for EWrap<'i> {
         false
     }
 
-    fn prev_sibling_element(&self) -> Option<EWrap<'i>> {
+    fn prev_sibling_element(&self) -> Option<EWrap<'a>> {
         let p = self.parent.as_ref()?;
         let i = self.index.checked_sub(1)?;
         Some(EWrap::child(p, i))
     }
 
-    fn next_sibling_element(&self) -> Option<EWrap<'i>> {
+    fn next_sibling_element(&self) -> Option<EWrap<'a>> {
         let p = self.parent.as_ref()?;
         let i = self.index + 1;
         if i >= p.node.children.len() {
@@ -251,7 +252,7 @@ impl<'i> Element<'i> for EWrap<'i> {
         false
     }
 
-    fn is_same_type(&self, other: &EWrap<'i>) -> bool {
+    fn is_same_type(&self, other: &EWrap<'a>) -> bool {
         self.node.tag.eq_ignore_ascii_case(&other.node.tag)
     }
 
@@ -275,7 +276,7 @@ impl<'i> Element<'i> for EWrap<'i> {
         _flags_setter: &mut F,
     ) -> bool
     where
-        F: FnMut(&EWrap<'i>, parcel_selectors::matching::ElementSelectorFlags),
+        F: FnMut(&EWrap<'a>, parcel_selectors::matching::ElementSelectorFlags),
     {
         false
     }
