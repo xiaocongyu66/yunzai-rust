@@ -39,66 +39,10 @@ pub fn tag_inline(tag: &str) -> bool {
 
 #[derive(Clone)]
 pub struct CssRule {
-    pub selector: Vec<SelectorPart>,
+    /// parcel_selectors 结构化选择器（Servo 同款匹配，nth/组合子全由其处理）
+    pub selector: crate::renderer::matcher::SelSelector,
     pub decls: BTreeMap<String, String>,
     pub specificity: u32,
-    /// :nth-child(odd/even/an+b) 剥离后存于规则级（修饰复合选择器主体段）
-    pub nth: Option<NthSpec>,
-}
-
-/// :nth-child 参数（1-based 兄弟序号）
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum NthSpec {
-    Odd,
-    Even,
-    AnB { a: i32, b: i32 },
-}
-
-impl NthSpec {
-    pub fn matches(&self, index: usize) -> bool {
-        // index 为 1-based
-        match self {
-            NthSpec::Odd => index % 2 == 1,
-            NthSpec::Even => index % 2 == 0,
-            NthSpec::AnB { a, b } => {
-                if *a == 0 {
-                    index as i32 == *b
-                } else {
-                    let d = index as i32 - b;
-                    d % a == 0 && d / a >= 0
-                }
-            }
-        }
-    }
-}
-
-/// 解析 nth-child 参数串（odd/even/3n+1/-n+2/an-b/纯数字）
-pub fn parse_nth(arg: &str) -> Option<NthSpec> {
-    let a0 = arg.trim().to_lowercase().replace(' ', "");
-    match a0.as_str() {
-        "odd" => return Some(NthSpec::Odd),
-        "even" => return Some(NthSpec::Even),
-        _ => {}
-    }
-    if let Ok(b) = a0.parse::<i32>() {
-        return Some(NthSpec::AnB { a: 0, b });
-    }
-    // an+b / an-b / -n+b / n
-    let (a_str, b_str) = match a0.find('n') {
-        Some(pos) => (&a0[..pos], &a0[pos + 1..]),
-        None => return None,
-    };
-    let a = match a_str {
-        "" => 1,
-        "-" => -1,
-        v => v.parse::<i32>().ok()?,
-    };
-    let b = if b_str.is_empty() {
-        0
-    } else {
-        b_str.parse::<i32>().ok()?
-    };
-    Some(NthSpec::AnB { a, b })
 }
 
 /// 选择器单段（如 `.a .b > span` → 三段）

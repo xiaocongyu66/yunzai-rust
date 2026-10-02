@@ -8,6 +8,10 @@
 pub mod css;
 pub mod dom;
 pub mod layout;
+pub mod matcher;
+
+/// lightningcss 解析好的选择器（其 Selectors Impl 私有，经 matcher::convert_selector 转译）
+pub type LcSelector<'i> = lightningcss::selector::Selector<'i>;
 pub mod media;
 pub mod paint;
 pub mod style;

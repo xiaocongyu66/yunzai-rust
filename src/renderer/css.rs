@@ -3,8 +3,12 @@
 //! 模板生成的 CSS 是规范格式（无 hack），手写解析足够；
 //! 值解析（颜色/渐变/尺寸）在 layout/paint 阶段按需处理。
 
-use super::dom::{CssRule, SelectorPart, StyleNode};
+use super::dom::{CssRule, StyleNode};
+use super::matcher::{EWrap, SelSelector};
+use parcel_selectors::context::{MatchingContext, MatchingMode, QuirksMode};
+use parcel_selectors::parser::Selector;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 /// 解析样式表：Lightning CSS 结构化遍历（Style 规则 + @font-face + @media 展开 + @import 递归）
 pub fn parse_stylesheet(css: &str) -> Vec<CssRule> {
@@ -14,29 +18,12 @@ pub fn parse_stylesheet(css: &str) -> Vec<CssRule> {
 /// 伪元素规则（::before / ::after）
 #[derive(Clone, Debug)]
 pub struct PseudoRule {
-    pub parent: Vec<SelectorPart>,
+    pub parent: SelSelector,
     pub which: &'static str,
     pub decls: BTreeMap<String, String>,
 }
 
 /// 拆分选择器尾部的伪元素，返回 (主体, Some(伪元素名)) 或 (原样, None)
-fn split_pseudo(sel: &str) -> (String, Option<&'static str>) {
-    let s = sel.trim();
-    for (lit, which) in [
-        ("::before", "before"),
-        ("::after", "after"),
-        (":before", "before"),
-        (":after", "after"),
-    ] {
-        if let Some(rest) = s.strip_suffix(lit) {
-            let rest = rest.trim();
-            if !rest.is_empty() {
-                return (rest.to_string(), Some(which));
-            }
-        }
-    }
-    (s.to_string(), None)
-}
 
 /// @import 递归深度上限（防循环引用）
 const MAX_IMPORT_DEPTH: u32 = 5;
@@ -120,67 +107,28 @@ fn collect_style(st: &lightningcss::rules::style::StyleRule, ctx: &mut SheetColl
     // 不经 to_css_string 再字符串解析
     use lightningcss::selector::{Component, Combinator};
 use parcel_selectors::parser::NthType;
-    for sel in st.selectors.0.iter() {
-        let mut parts: Vec<super::dom::SelectorPart> = Vec::new();
-        let mut nth: Option<super::dom::NthSpec> = None;
-        let mut pseudo_elem: Option<&'static str> = None;
-        let mut unsupported = false;
-        for comp in sel.iter() {
-            match comp {
-                Component::LocalName(ln) => {
-                    let t = ln.lower_name.to_string();
-                    parts.push(super::dom::SelectorPart::Tag(t));
-                }
-                Component::ExplicitUniversalType => {
-                    parts.push(super::dom::SelectorPart::Tag("*".to_string()));
-                }
-                Component::Class(c) => {
-                    parts.push(super::dom::SelectorPart::Class(c.to_string()));
-                }
-                Component::ID(id) => {
-                    parts.push(super::dom::SelectorPart::Id(id.to_string()));
-                }
-                Component::Combinator(c) => match c {
-                    Combinator::Child => parts.push(super::dom::SelectorPart::Child),
-                    Combinator::Descendant => parts.push(super::dom::SelectorPart::Descendant),
-                    _ => unsupported = true,
-                },
-                Component::Nth(d) if matches!(d.ty, NthType::Child) => {
-                    // odd/even/an+b 解析时已归一为 (a, b)：odd=2n+1、even=2n、first-child=0n+1
-                    nth = Some(super::dom::NthSpec::AnB { a: d.a, b: d.b });
-                }
-                Component::Nth(_) => unsupported = true,
-                Component::PseudoElement(pe) => {
-                    use lightningcss::selector::PseudoElement;
-                    pseudo_elem = Some(match pe {
-                        PseudoElement::Before => "before",
-                        PseudoElement::After => "after",
-                        _ => {
-                            unsupported = true;
-                            ""
-                        }
-                    });
-                }
-                Component::NonTSPseudoClass(_) => unsupported = true,
-                _ => {}
-            }
-        }
-        if unsupported || parts.is_empty() {
+    // 选择器解析：lightningcss 序列化字符串 → parcel 标准解析器（Servo 同款匹配链）
+    let sel_str = st.selectors.to_css_string(lc_opts()).unwrap_or_default();
+    for one in sel_str.split(',') {
+        let one = one.trim();
+        if one.is_empty() {
             continue;
         }
-        if let Some(w) = pseudo_elem {
+        let Some((sel, which)) = super::matcher::parse_selector_static(one) else {
+            continue;
+        };
+        if let Some(w) = which {
             ctx.pseudos.push(PseudoRule {
-                parent: parts,
+                parent: sel,
                 which: w,
                 decls: decls.iter().cloned().collect(),
             });
             continue;
         }
         ctx.rules.push(CssRule {
-            selector: parts,
+            selector: sel,
             decls: decls.iter().cloned().collect(),
-            specificity: sel.specificity() as u32,
-            nth,
+            specificity: 0,
         });
     }
 }
@@ -238,113 +186,73 @@ fn pick_face_url(urls: &[String]) -> Option<String> {
 
 /// 应用伪元素规则：命中 parent 选择器的节点，注入 ::before/::after 虚拟子节点
 pub fn apply_pseudo(root: &mut StyleNode, rules: &[PseudoRule]) {
+    let root = root;
     if rules.is_empty() {
         return;
     }
-    apply_pseudo_rec(root, rules, &[]);
-}
-
-fn apply_pseudo_rec(node: &mut StyleNode, rules: &[PseudoRule], ancestors: &[NodeKey]) {
-    let key = key_of(node);
-    // 当前节点作为"父"匹配：selector_matches 最后一格匹配 cur
-    let mut be: Option<PseudoRule> = None;
-    let mut af: Option<PseudoRule> = None;
-    for r in rules {
-        if selector_matches(&r.parent, ancestors, &key) {
-            match r.which {
-                "before" => be = Some(r.clone()),
-                _ => af = Some(r.clone()),
-            }
+    // 两遍法：先不可变匹配收集 (路径, before/after 规则)，再可变插入
+    let mut found: Vec<(Vec<usize>, bool, PseudoRule)> = Vec::new();
+    {
+        let ew = Rc::new(EWrap { node: &*root, parent: None, index: 0 });
+        collect_pseudo_at(&root, rules, Some(ew.clone()), 0, &mut Vec::new(), &mut found);
+    }
+    // 路径深的先插，避免索引位移；同路径 before 先于 after
+    found.sort_by_key(|(p, is_before, _)| (std::cmp::Reverse(p.clone()), !*is_before));
+    let root: &mut StyleNode = root;
+    for (path, is_before, r) in found {
+        let Some(n) = node_at_mut(root, &path) else { continue };
+        let content = r.decls.get("content").cloned().unwrap_or_default();
+        let content = content.trim_matches(|c| c == '"' || c == '\'').to_string();
+        let mut child = StyleNode {
+            tag: if is_before { "::before".into() } else { "::after".into() },
+            id: None,
+            classes: Vec::new(),
+            decls: r.decls.clone(),
+            text: content,
+            children: Vec::new(),
+            src: None,
+        };
+        child.decls.remove("content");
+        if is_before {
+            n.children.insert(0, child);
+        } else {
+            n.children.push(child);
         }
     }
-    if let Some(r) = be {
-        let content = r.decls.get("content").cloned().unwrap_or_default();
-        let content = content.trim_matches(|c| c == '"' || c == '\'').to_string();
-        let mut child = StyleNode {
-            tag: "::before".to_string(),
-            id: None,
-            classes: Vec::new(),
-            decls: Default::default(),
-            text: String::new(),
-            children: Vec::new(),
-            src: None,
-        };
-        child.decls = r.decls.clone();
-        child.decls.remove("content");
-        child.text = content;
-        node.children.insert(0, child);
+}
+
+fn collect_pseudo_at<'a>(
+    node: &'a StyleNode,
+    rules: &[PseudoRule],
+    parent: Option<Rc<EWrap<'a>>>,
+    index: usize,
+    path: &mut Vec<usize>,
+    out: &mut Vec<(Vec<usize>, bool, PseudoRule)>,
+) {
+    use super::matcher::matches as sel_matches;
+    // SAFETY：同 collect_at——匹配只读、引用不外泄
+    let node_static: &'static StyleNode = unsafe { std::mem::transmute::<&StyleNode, &'static StyleNode>(node) };
+    let parent_static: Option<Rc<EWrap<'static>>> = unsafe {
+        std::mem::transmute::<Option<Rc<EWrap>>, Option<Rc<EWrap<'static>>>>(parent)
+    };
+    let ew = Rc::new(EWrap { node: node_static, parent: parent_static, index });
+    let mut ctx = MatchingContext::new(MatchingMode::Normal, None, None, QuirksMode::NoQuirks);
+    for r in rules {
+        if sel_matches(&r.parent, &ew, &mut ctx) {
+            let is_before = r.which == "before";
+            out.push((path.clone(), is_before, r.clone()));
+        }
     }
-    if let Some(r) = af {
-        let content = r.decls.get("content").cloned().unwrap_or_default();
-        let content = content.trim_matches(|c| c == '"' || c == '\'').to_string();
-        let mut child = StyleNode {
-            tag: "::after".to_string(),
-            id: None,
-            classes: Vec::new(),
-            decls: Default::default(),
-            text: String::new(),
-            children: Vec::new(),
-            src: None,
-        };
-        child.decls = r.decls.clone();
-        child.decls.remove("content");
-        child.text = content;
-        node.children.push(child);
-    }
-    let mut child_anc: Vec<NodeKey> = ancestors.to_vec();
-    child_anc.push(key);
-    for c in node.children.iter_mut() {
-        apply_pseudo_rec(c, rules, &child_anc);
+    for (i, c) in node.children.iter().enumerate() {
+        path.push(i);
+        collect_pseudo_at(c, rules, Some(ew.clone()), i, path, out);
+        path.pop();
     }
 }
 
 /// `div.card > .name span` → [Tag(div), Class(card), Child, Class(name), Descendant, Tag(span)]
 /// 剥离选择器串中的 :nth-child(...)（含大小写/空格形态）→ (NthSpec, 余下选择器)
-fn strip_nth_child(sel: &str) -> (Option<super::dom::NthSpec>, String) {
-    let lower = sel.to_lowercase();
-    let Some(pos) = lower.find(":nth-child(") else {
-        return (None, sel.to_string());
-    };
-    let open = pos + ":nth-child(".len();
-    let Some(rel) = sel[open..].find(')') else {
-        return (None, sel.to_string());
-    };
-    let arg = &sel[open..open + rel];
-    let nth = super::dom::parse_nth(arg);
-    let mut rest = String::with_capacity(sel.len());
-    rest.push_str(&sel[..pos]);
-    rest.push_str(&sel[open + rel + 1..]);
-    (nth, rest)
-}
 
-fn compile_selector(sel: &str) -> (Vec<SelectorPart>, u32) {
-    let mut parts = Vec::new();
-    let mut spec = 0u32;
-    for raw in sel.split_whitespace() {
-        // 处理 `>`（可能独立或粘连）
-        for token in split_combinators(raw) {
-            match token {
-                Combinator::Child => parts.push(SelectorPart::Child),
-                Combinator::Desc => parts.push(SelectorPart::Descendant),
-                Combinator::Simple(s) => {
-                    if let Some(cls) = s.strip_prefix('.') {
-                        parts.push(SelectorPart::Class(cls.to_string()));
-                        spec += 10;
-                    } else if let Some(id) = s.strip_prefix('#') {
-                        parts.push(SelectorPart::Id(id.to_string()));
-                        spec += 100;
-                    } else if s == "*" {
-                        parts.push(SelectorPart::Tag("*".into()));
-                    } else {
-                        parts.push(SelectorPart::Tag(s.to_string()));
-                        spec += 1;
-                    }
-                }
-            }
-        }
-    }
-    (parts, spec)
-}
 
 enum Combinator {
     Child,
@@ -586,137 +494,78 @@ pub fn split_commas(s: &str) -> Vec<String> {
 
 /// 样式匹配：规则表应用到节点树（specificity 升序应用，inline 已在 decls 中最高优先）
 pub fn apply_styles(mut root: StyleNode, rules: &[CssRule]) -> StyleNode {
-    let mut sorted: Vec<&CssRule> = rules.iter().collect();
-    sorted.sort_by_key(|r| r.specificity);
-    let refs: Vec<CssRule> = sorted.into_iter().cloned().collect();
-    apply_rec(&mut root, &refs, &[]);
+    // 两遍法（Servo 风格解耦匹配与修改）：
+    // 1) 不可变遍历：EWrap 链 + matches_selector 收集 (索引路径, 级联声明)
+    // 2) 可变遍历：按路径回填（inline style 已在 decls 中最后覆盖）
+    let mut collected: Vec<(Vec<usize>, BTreeMap<String, String>)> = Vec::new();
+    {
+        let ew = Rc::new(EWrap { node: &root, parent: None, index: 0 });
+        collect_at(&root, rules, Some(ew.clone()), 0, &mut Vec::new(), &mut collected);
+    }
+    for (path, decls) in collected {
+        let Some(n) = node_at_mut(&mut root, &path) else { continue };
+        let inline = n.decls.clone();
+        n.decls.clear();
+        for (k, v) in decls {
+            n.decls.insert(k, v);
+        }
+        for (k, v) in inline {
+            n.decls.insert(k, v);
+        }
+    }
     root
 }
 
-/// 祖先快照（匹配用）
-#[derive(Clone)]
-struct NodeKey {
-    tag: String,
-    classes: Vec<String>,
-    id: Option<String>,
-    /// 1-based 兄弟序号（:nth-child 用）
+fn node_at_mut<'n>(n: &'n mut StyleNode, path: &[usize]) -> Option<&'n mut StyleNode> {
+    let [i, rest @ ..] = path else { return Some(n) };
+    let c = n.children.get_mut(*i)?;
+    node_at_mut(c, rest)
+}
+
+fn collect_at<'a>(
+    node: &'a StyleNode,
+    rules: &[CssRule],
+    parent: Option<Rc<EWrap<'a>>>,
     index: usize,
-}
+    path: &mut Vec<usize>,
+    out: &mut Vec<(Vec<usize>, BTreeMap<String, String>)>,
+) {
+    use super::matcher::matches as sel_matches;
+    // SAFETY：匹配阶段为只读，且 'static 引用不逃逸出本函数（out 仅存路径与声明的拷贝）；
+    // StyleNode 树由调用方持有，生命周期覆盖整个匹配过程。
+    let node_static: &'static StyleNode = unsafe { std::mem::transmute::<&StyleNode, &'static StyleNode>(node) };
+    let parent_static: Option<Rc<EWrap<'static>>> = unsafe {
+        std::mem::transmute::<Option<Rc<EWrap>>, Option<Rc<EWrap<'static>>>>(parent)
+    };
+    let ew = Rc::new(EWrap { node: node_static, parent: parent_static, index });
+    let mut ctx = MatchingContext::new(MatchingMode::Normal, None, None, QuirksMode::NoQuirks);
 
-fn key_of(n: &StyleNode) -> NodeKey {
-    key_at(n, 1)
-}
-
-fn key_at(n: &StyleNode, index: usize) -> NodeKey {
-    NodeKey { tag: n.tag.clone(), classes: n.classes.clone(), id: n.id.clone(), index }
-}
-
-fn apply_rec(node: &mut StyleNode, rules: &[CssRule], ancestors: &[NodeKey]) {
-    apply_at(node, rules, ancestors, 1)
-}
-
-fn apply_at(node: &mut StyleNode, rules: &[CssRule], ancestors: &[NodeKey], index: usize) {
-    let key = key_at(node, index);
-
-    let mut matched_decls: BTreeMap<String, String> = BTreeMap::new();
-    for rule in rules {
-        let m = selector_matches(&rule.selector, ancestors, &key);
-        let n = rule.nth.map(|x| x.matches(key.index));
-        if std::env::var("YZ_DEBUG_NTH").is_ok() && rule.nth.is_some() {
-            eprintln!("[nth] sel={:?} nth={:?} idx={} selmatch={} nthmatch={:?}",
-                rule.selector, rule.nth, key.index, m, n);
+    let mut matched: Vec<(u32, usize, &BTreeMap<String, String>)> = Vec::new();
+    for (ri, rule) in rules.iter().enumerate() {
+        if sel_matches(&rule.selector, &ew, &mut ctx) {
+            matched.push((rule.specificity, ri, &rule.decls));
         }
-        if m && n.unwrap_or(true)
-        {
-            for (k, v) in &rule.decls {
-                matched_decls.insert(k.clone(), v.clone());
+    }
+    if !matched.is_empty() {
+        matched.sort_by_key(|(sp, ri, _)| (*sp, *ri));
+        let mut cascaded = BTreeMap::new();
+        for (_, _, decls) in &matched {
+            for (k, v) in decls.iter() {
+                cascaded.insert(k.clone(), v.clone());
             }
         }
+        out.push((path.clone(), cascaded));
     }
-    // 规则声明先落，inline（已在 decls）覆盖
-    let inline = node.decls.clone();
-    for (k, v) in matched_decls {
-        node.decls.entry(k).or_insert(v);
-    }
-    for (k, v) in inline {
-        node.decls.insert(k, v);
-    }
-
-    let mut child_anc: Vec<NodeKey> = ancestors.to_vec();
-    child_anc.push(key);
-    for (i, c) in node.children.iter_mut().enumerate() {
-        apply_at(c, rules, &child_anc, i + 1);
+    for (i, c) in node.children.iter().enumerate() {
+        path.push(i);
+        collect_at(c, rules, Some(ew.clone()), i, path, out);
+        path.pop();
     }
 }
 
 /// 选择器匹配：从最后一段（当前节点）向前，沿祖先链回溯
-fn selector_matches(parts: &[SelectorPart], ancestors: &[NodeKey], cur: &NodeKey) -> bool {
-    let Some((last, rest)) = parts.split_last() else {
-        return false;
-    };
-    if !part_matches(last, cur) {
-        return false;
-    }
-    if rest.is_empty() {
-        return true;
-    }
-    // 组合子驱动：逐段消耗 rest（从右向左），ancestors 也从右向左
-    let mut ai = ancestors.len(); // 下一个可比较的祖先索引（从最近的父开始）
-    let mut ri = rest.len();
-    while ri > 0 {
-        // 期望一个简单选择器段
-        let need = &rest[ri - 1];
-        if matches!(need, SelectorPart::Child | SelectorPart::Descendant) {
-            ri -= 1;
-            continue;
-        }
-        let combinator = if ri >= 2 { rest[ri - 2].clone() } else { SelectorPart::Descendant };
-        match combinator {
-            SelectorPart::Child => {
-                // 父必须直接匹配 need
-                if ai == 0 || !part_matches(need, &ancestors[ai - 1]) {
-                    return false;
-                }
-                ai -= 1;
-                ri -= 2;
-            }
-            _ => {
-                // 后代：向上找到第一个匹配
-                let mut found = false;
-                while ai > 0 {
-                    ai -= 1;
-                    if part_matches(need, &ancestors[ai]) {
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    return false;
-                }
-                ri = ri.saturating_sub(2); // rest 末段无组合子可消耗，防下溢
-            }
-        }
-    }
-    true
-}
 
-fn part_matches(p: &SelectorPart, n: &NodeKey) -> bool {
-    match p {
-        SelectorPart::Tag(t) => t == "*" || *t == n.tag,
-        SelectorPart::Class(c) => n.classes.iter().any(|x| x == c),
-        SelectorPart::Id(i) => n.id.as_deref() == Some(i.as_str()),
-        _ => false,
-    }
-}
 
-fn simple_matches(p: &SelectorPart, s: &str) -> bool {
-    match p {
-        SelectorPart::Tag(t) => t == "*" || t == s,
-        SelectorPart::Class(c) => c == s,
-        SelectorPart::Id(i) => i == s,
-        _ => false,
-    }
-}
 
 /// @font-face 别名替换：遍历样式树，把 font-family 里引用的别名换成字体内部真实名
 pub fn apply_font_aliases(
