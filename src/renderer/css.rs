@@ -96,12 +96,35 @@ fn read_import_source(url: &str, css_dir: &str) -> Option<(String, String)> {
     Some((css, dir))
 }
 
+struct StylesheetUrls<'a> {
+    base: &'a str,
+}
+
+impl<'i> lightningcss::visitor::Visitor<'i> for StylesheetUrls<'_> {
+    type Error = std::convert::Infallible;
+
+    fn visit_types(&self) -> lightningcss::visitor::VisitTypes {
+        lightningcss::visit_types!(URLS)
+    }
+
+    fn visit_url(&mut self, url: &mut lightningcss::values::url::Url<'i>) -> Result<(), Self::Error> {
+        url.url = super::media::resolve(&url.url, self.base).into();
+        Ok(())
+    }
+}
+
 /// 样式规则展开：声明序列化 + 选择器编译（伪元素单独收集）
 fn collect_style(st: &lightningcss::rules::style::StyleRule, ctx: &mut SheetCollector) {
     use lightningcss::traits::ToCss;
     let mut decls: Vec<(String, String)> = Vec::new();
+    use lightningcss::visitor::Visit;
+    let mut urls = StylesheetUrls { base: &ctx.css_dir };
     for d in st.declarations.declarations.iter() {
-        serialize_decl(d, &mut decls);
+        let mut d = d.clone();
+        match d.visit(&mut urls) {
+            Ok(()) => serialize_decl(&d, &mut decls),
+            Err(never) => match never {},
+        }
     }
     // 选择器透传：lightningcss 的结构化 Component 直读（Tag/Class/Id/组合子/nth/伪元素），
     // 不经 to_css_string 再字符串解析

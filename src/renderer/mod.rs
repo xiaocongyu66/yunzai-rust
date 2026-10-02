@@ -21,6 +21,14 @@ use serde_json::Value;
 
 /// 渲染 HTML → PNG。宽度默认 720，高度按内容自适应（上限 4096）。
 pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
+    let base_path = std::path::Path::new(base_dir);
+    let base_path = if base_path.is_absolute() {
+        base_path.to_path_buf()
+    } else {
+        std::env::current_dir().map_err(|e| format!("无法解析资源基准目录: {e}"))?.join(base_path)
+    };
+    let base_dir = base_path.to_string_lossy();
+    let base_dir = base_dir.as_ref();
     // 支持到 4K（3840）：宽度上限 4096；高度按内容自适应，保护上限 = 宽×4（防内存爆）
     let width = width.clamp(64, 4096) as f32;
 
@@ -67,6 +75,64 @@ pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> R
 
     // 4. 光栅化
     paint::paint(&root_paint, out_w as f32, height as f32, &mut fonts, base_dir)
+}
+
+#[cfg(test)]
+mod resource_tests {
+    #[test]
+    fn relative_and_absolute_resource_bases_render_identically() {
+        let cwd = std::env::current_dir().unwrap();
+        let root = tempfile::tempdir_in(&cwd).unwrap();
+        let relative = root.path().strip_prefix(&cwd).unwrap().to_str().unwrap();
+        let css = root.path().join("css");
+        std::fs::create_dir(&css).unwrap();
+        for (dir, color) in [(root.path(), [255, 0, 0, 255]), (css.as_path(), [0, 255, 0, 255])] {
+            image::RgbaImage::from_pixel(16, 16, image::Rgba(color))
+                .save(dir.join("image.png")).unwrap();
+        }
+        std::fs::write(css.join("style.css"), "div{background:url(image.png)}").unwrap();
+        std::fs::write(css.join("import.css"), "@import 'style.css';").unwrap();
+        for (source, expected) in [
+            ("<style>div{background:url(image.png)}</style>", [255, 0, 0, 255]),
+            ("<link rel='stylesheet' href='css/style.css'>", [0, 255, 0, 255]),
+            ("<link rel='stylesheet' href='css/import.css'>", [0, 255, 0, 255]),
+        ] {
+            let html = format!("<style>body{{margin:0;width:64px;height:32px}}div{{width:16px;height:16px}}</style>{source}<div></div>");
+            for base in [relative, root.path().to_str().unwrap()] {
+                let png = super::render(&html, 64, &[], base).unwrap();
+                let image = image::load_from_memory(&png).unwrap().to_rgba8();
+                assert_eq!(image.get_pixel(8, 8).0, expected, "{source}, base={base}");
+            }
+        }
+    }
+
+    #[test]
+    fn external_and_imported_stylesheets_use_their_own_image_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let css = root.path().join("css");
+        let nested = css.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        for (dir, color) in [
+            (root.path(), [255, 0, 0, 255]),
+            (css.as_path(), [0, 255, 0, 255]),
+            (nested.as_path(), [0, 0, 255, 255]),
+        ] {
+            image::RgbaImage::from_pixel(16, 16, image::Rgba(color))
+                .save(dir.join("image.png")).unwrap();
+        }
+        std::fs::write(css.join("style.css"), "div{background-image:url(image.png)}").unwrap();
+        std::fs::write(nested.join("style.css"), "div{background:url(image.png) no-repeat}").unwrap();
+        std::fs::write(css.join("import.css"), "@import 'nested/style.css';").unwrap();
+        for (sheet, expected) in [
+            ("css/style.css", [0, 255, 0, 255]),
+            ("css/import.css", [0, 0, 255, 255]),
+        ] {
+            let html = format!("<style>body{{margin:0;width:64px;height:32px}}div{{width:16px;height:16px}}</style><link rel='stylesheet' href='{sheet}'><div></div>");
+            let png = super::render(&html, 64, &[], root.path().to_str().unwrap()).unwrap();
+            let image = image::load_from_memory(&png).unwrap().to_rgba8();
+            assert_eq!(image.get_pixel(8, 8).0, expected, "{sheet}");
+        }
+    }
 }
 
 /// op 层入口：JSON 参数 { html, width?, fontDirs? } → { data: base64, width, height }
