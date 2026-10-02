@@ -48,7 +48,7 @@ blitz-traits = { version = "0.4.12", package = "ps-blitz-traits", default-featur
 parley = { version = "0.10", default-features = false, features = ["std"] }
 anyrender = { version = "0.13.0", package = "ps-anyrender" }
 peniko = "0.6.0"
-anyrender_vello_cpu = { version = "0.17.1", package = "ps-anyrender-vello-cpu" }
+anyrender_vello_cpu = { version = "0.17.1", package = "ps-anyrender-vello-cpu", features = ["filters"] }
 ps-taffy = { version = "0.13.0", package = "ps-taffy", default-features = false, features = ["float_layout"] }
 png = "0.18"
 
