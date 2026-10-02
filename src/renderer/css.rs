@@ -542,7 +542,7 @@ fn lc_val<T: lightningcss::traits::ToCss>(v: &T) -> String {
 
 /// 解析选项：错误恢复开启（浏览器语义）——单条非法声明仅该条被丢弃，
 /// 不再使整个样式表解析失败（曾导致一张无效色值废掉整页样式）
-fn lc_parse_opts<'i>() -> lightningcss::stylesheet::ParserOptions<'i, 'static> {
+fn lc_parse_opts<'i>() -> lightningcss::stylesheet::ParserOptions<'i> {
     lightningcss::stylesheet::ParserOptions {
         error_recovery: true,
         ..Default::default()
@@ -673,7 +673,7 @@ fn collect_at<'a>(
     parent: Option<Rc<EWrap<'a>>>,
     index: usize,
     path: &mut Vec<usize>,
-    out: &mut Vec<(Vec<usize>, BTreeMap<String, String>)>,
+    out: &mut Vec<(Vec<usize>, BTreeMap<String, String>, BTreeMap<String, String>)>,
 ) {
     use super::matcher::matches as sel_matches;
     // SAFETY：匹配阶段为只读，且 'static 引用不逃逸出本函数（out 仅存路径与声明的拷贝）；
