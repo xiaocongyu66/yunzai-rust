@@ -68,7 +68,7 @@ fn build_font_ctx(font_dirs: &[String]) -> blitz_dom::FontContext {
         source_cache: SourceCache::new_shared(),
         collection: Collection::new(CollectionOptions {
             shared: false,
-            system_fonts: true,
+            system_fonts: false,
         }),
     };
     for dir in font_dirs {

@@ -38,15 +38,16 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 resvg = "0.44"
 lightningcss = { version = "1.0.0-alpha.57", features = ["visitor"] }
 
-# Blitz 渲染引擎（stylo 样式 + taffy 布局 + vello_cpu CPU 光栅化；GPU 特性后补）
-blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7", default-features = false }
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7", default-features = false, features = ["svg", "woff", "system-fonts"] }
-blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7", default-features = false, features = ["svg"] }
-blitz-net = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7", default-features = false }
-parley = { git = "https://github.com/linebender/parley", rev = "718dcb721941fd8e72128833122d31f5a4e80504", default-features = false, features = ["std"] }
+# ps-blitz 渲染栈（pathscale 增强版 Blitz：JS 引擎/position:fixed/shadow DOM/floats 可选；
+# crates.io 0.4.12，包名 ps-* 经 rename 保持 blitz_* 代码路径不变；字体全靠 fontDirs + @font-face）
+blitz-html = { version = "0.4.12", package = "ps-blitz-html", default-features = false }
+blitz-dom = { version = "0.4.12", package = "ps-blitz-dom", default-features = false, features = ["svg", "woff", "floats"] }
+blitz-paint = { version = "0.4.12", package = "ps-blitz-paint", default-features = false, features = ["svg"] }
+blitz-net = { version = "0.4.12", package = "ps-blitz-net", default-features = false }
+parley = { version = "0.10", default-features = false, features = ["std"] }
 anyrender = "0.13.0"
 peniko = "0.6.0"
-anyrender_vello_cpu = "0.17.0"
+anyrender_vello_cpu = "0.17.1"
 png = "0.18"
 
 ulid = "1"
