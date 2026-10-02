@@ -58,8 +58,25 @@ impl TextEngine {
             return;
         }
         let Ok(data) = std::fs::read(path) else { return };
+        // fontdb（ttf-parser）只认 sfnt：WOFF1 解包成 TTF 再灌入
+        let data = if data.starts_with(b"wOFF") {
+            match woff_to_ttf(&data) {
+                Some(ttf) => ttf,
+                None => {
+                    crate::util::make_log1(crate::logger::Level::Warn, Some("Renderer"), format!("WOFF 解包失败: {path}"));
+                    return;
+                }
+            }
+        } else {
+            data
+        };
         let before = self.font_system.db().faces().count();
         self.font_system.db_mut().load_font_data(data);
+        // fontdb 对非法数据静默忽略：faces 数没涨说明没注册成功
+        if self.font_system.db().faces().count() == before {
+            crate::util::make_log1(crate::logger::Level::Warn, Some("Renderer"), format!("字体未注册（格式不支持）: {path}"));
+            return;
+        }
         // 找到新加的 face，取其内部真实 family 名
         if let Some(face) = self.font_system.db().faces().nth(before) {
             let real = face
@@ -279,4 +296,83 @@ pub fn draw_with_letter_spacing<F>(
             );
         }
     }
+}
+
+/// WOFF1 → sfnt(TTF) 解包：44B 头 + 20B/项表目录，表数据 zlib；重组为标准 TTF 布局
+fn woff_to_ttf(data: &[u8]) -> Option<Vec<u8>> {
+    use std::io::Read;
+    if data.len() < 44 || &data[0..4] != b"wOFF" {
+        return None;
+    }
+    let u32at = |o: usize| -> Option<u32> {
+        data.get(o..o + 4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let flavor = u32at(4)?;
+    let num_tables = u16::from_be_bytes([data[12], data[13]]) as usize;
+    if num_tables == 0 || data.len() < 44 + num_tables * 20 {
+        return None;
+    }
+
+    struct Tbl {
+        tag: [u8; 4],
+        data: Vec<u8>,
+        checksum: u32,
+    }
+    let mut tables: Vec<Tbl> = Vec::with_capacity(num_tables);
+    for i in 0..num_tables {
+        let o = 44 + i * 20;
+        let tag = [data[o], data[o + 1], data[o + 2], data[o + 3]];
+        let off = u32at(o + 4)? as usize;
+        let comp = u32at(o + 8)? as usize;
+        let orig = u32at(o + 12)? as usize;
+        let checksum = u32at(o + 16)?;
+        let raw = data.get(off..off + comp)?;
+        let tbl = if comp == orig {
+            raw.to_vec()
+        } else {
+            let mut d = Vec::with_capacity(orig);
+            flate2::read::ZlibDecoder::new(raw).read_to_end(&mut d).ok()?;
+            if d.len() != orig {
+                return None;
+            }
+            d
+        };
+        tables.push(Tbl { tag, data: tbl, checksum });
+    }
+    // sfnt 目录要求 tag 升序
+    tables.sort_by(|a, b| a.tag.cmp(&b.tag));
+
+    let hdr_len = 12 + tables.len() * 16;
+    let mut offsets = Vec::with_capacity(tables.len());
+    let mut cur = hdr_len;
+    for t in &tables {
+        offsets.push(cur as u32);
+        cur += (t.data.len() + 3) & !3;
+    }
+
+    let mut out = Vec::with_capacity(cur);
+    out.extend_from_slice(&flavor.to_be_bytes());
+    let n = tables.len() as u16;
+    out.extend_from_slice(&n.to_be_bytes());
+    let mut entry_selector = 0u16;
+    while (1u16 << (entry_selector + 1)) <= n {
+        entry_selector += 1;
+    }
+    let search_range = (1u16 << entry_selector) * 16;
+    out.extend_from_slice(&search_range.to_be_bytes());
+    out.extend_from_slice(&entry_selector.to_be_bytes());
+    out.extend_from_slice(&(n * 16 - search_range).to_be_bytes());
+    for (i, t) in tables.iter().enumerate() {
+        out.extend_from_slice(&t.tag);
+        out.extend_from_slice(&t.checksum.to_be_bytes());
+        out.extend_from_slice(&offsets[i].to_be_bytes());
+        out.extend_from_slice(&(t.data.len() as u32).to_be_bytes());
+    }
+    for t in &tables {
+        out.extend_from_slice(&t.data);
+        while out.len() % 4 != 0 {
+            out.push(0);
+        }
+    }
+    Some(out)
 }

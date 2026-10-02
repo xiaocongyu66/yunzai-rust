@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 /// 解析样式表：Lightning CSS 结构化遍历（Style 规则 + @font-face + @media 展开 + @import 递归）
 pub fn parse_stylesheet(css: &str) -> Vec<CssRule> {
-    parse_stylesheet_lc(css).0
+    parse_stylesheet_lc(css, "").0
 }
 
 /// 伪元素规则（::before / ::after）
@@ -47,12 +47,15 @@ struct SheetCollector {
     rules: Vec<CssRule>,
     faces: Vec<(String, String)>,
     pseudos: Vec<PseudoRule>,
+    /// 当前样式表文件目录：@font-face / @import 的 url 基准
+    css_dir: String,
 }
 
-/// 返回 (样式规则, @font-face 列表, 伪元素规则列表)
-pub fn parse_stylesheet_lc(css: &str) -> (Vec<CssRule>, Vec<(String, String)>, Vec<PseudoRule>) {
+/// 返回 (样式规则, @font-face 列表, 伪元素规则列表)；css_dir 为该样式表的文件目录（@font-face url 基准）
+pub fn parse_stylesheet_lc(css: &str, css_dir: &str) -> (Vec<CssRule>, Vec<(String, String)>, Vec<PseudoRule>) {
     use lightningcss::stylesheet::{ParserOptions, StyleSheet};
     let mut ctx = SheetCollector::default();
+    ctx.css_dir = css_dir.to_string();
     if let Ok(ss) = StyleSheet::parse(css, ParserOptions::default()) {
         collect_rules(&ss.rules, &mut ctx, 0);
     }
@@ -78,10 +81,12 @@ fn collect_rules(list: &lightningcss::rules::CssRuleList, ctx: &mut SheetCollect
             LcRule::MozDocument(d) => collect_rules(&d.rules, ctx, depth),
             LcRule::Import(i) => {
                 if depth < MAX_IMPORT_DEPTH {
-                    if let Some(css) = read_import_source(&i.url.to_string()) {
+                    if let Some((css, sub_dir)) = read_import_source(&i.url.to_string(), &ctx.css_dir) {
+                        let prev = std::mem::replace(&mut ctx.css_dir, sub_dir);
                         if let Ok(ss) = StyleSheet::parse(&css, ParserOptions::default()) {
                             collect_rules(&ss.rules, ctx, depth + 1);
                         }
+                        ctx.css_dir = prev;
                     }
                 }
             }
@@ -91,16 +96,17 @@ fn collect_rules(list: &lightningcss::rules::CssRuleList, ctx: &mut SheetCollect
 }
 
 /// @import url → 本地 CSS 文本（http(s)/data: 不支持；相对路径基于 BASE_DIR 解析）
-fn read_import_source(url: &str) -> Option<String> {
-    let base = crate::renderer::BASE_DIR
-        .get()
-        .cloned()
-        .unwrap_or_else(|| ".".to_string());
-    let path = super::media::resolve(url, &base);
+fn read_import_source(url: &str, css_dir: &str) -> Option<(String, String)> {
+    let path = super::media::resolve(url, css_dir);
     if path.starts_with("http://") || path.starts_with("https://") || path.starts_with("data:") {
         return None;
     }
-    std::fs::read_to_string(&path).ok()
+    let css = std::fs::read_to_string(&path).ok()?;
+    let dir = std::path::Path::new(&path)
+        .parent()
+        .map(|d| d.display().to_string())
+        .unwrap_or_else(|| ".".to_string());
+    Some((css, dir))
 }
 
 /// 样式规则展开：声明序列化 + 选择器编译（伪元素单独收集）
@@ -166,7 +172,8 @@ fn collect_font_face(ff: &lightningcss::rules::font_face::FontFaceRule, ctx: &mu
                     })
                     .collect();
                 if let Some(pick) = pick_face_url(&urls) {
-                    src = pick;
+                    // url 相对"所在 css 文件"解析成绝对路径（拼接样式表后基准不能丢）
+                    src = crate::renderer::media::resolve(&pick, &ctx.css_dir);
                 }
             }
             _ => {}

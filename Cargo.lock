@@ -3774,6 +3774,7 @@ dependencies = [
  "chrono",
  "cosmic-text",
  "cssparser 0.33.0",
+ "flate2",
  "futures",
  "futures-util",
  "html5ever",

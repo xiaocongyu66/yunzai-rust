@@ -69,15 +69,17 @@ pub fn parse_with_base(
         .one(html.as_bytes());
 
     let mut rules = vec![];
-    let mut styles = String::new();
+    // (样式文本, 基准目录)——@font-face/@import 的 url 相对各自来源解析
+    let mut chunks: Vec<(String, String)> = Vec::new();
     let mut link_hrefs: Vec<String> = vec![];
     walk(&dom.document, &mut |h| {
         if let NodeData::Element { name, attrs, .. } = &h.data {
             let local = name.local.to_string();
             match local.as_str() {
                 "style" => {
-                    collect_text(h, &mut styles);
-                    styles.push('\n');
+                    let mut text = String::new();
+                    collect_text(h, &mut text);
+                    chunks.push((text, base_dir.to_string()));
                 }
                 "link" => {
                     let mut rel_ok = false;
@@ -102,16 +104,25 @@ pub fn parse_with_base(
         }
     });
 
-    // 外部 CSS：<link href>（art-template 已把 _res_path 替换为绝对路径）
+    // 外部 CSS：<link href>（art-template 已把 _res_path 替换为绝对路径）——基准目录 = css 文件所在目录
     for href in link_hrefs {
         let path = crate::renderer::media::resolve(&href, base_dir);
         if let Ok(css) = std::fs::read_to_string(&path) {
-            styles.push_str(&css);
-            styles.push('\n');
+            let dir = std::path::Path::new(&path)
+                .parent()
+                .map(|d| d.display().to_string())
+                .unwrap_or_else(|| base_dir.to_string());
+            chunks.push((css, dir));
         }
     }
 
-    let (parsed_rules, font_faces, pseudo_rules) = crate::renderer::css::parse_stylesheet_lc(&styles);
+    let (mut parsed_rules, mut font_faces, mut pseudo_rules) = (vec![], vec![], vec![]);
+    for (css_text, dir) in &chunks {
+        let (r, f, p) = crate::renderer::css::parse_stylesheet_lc(css_text, dir);
+        parsed_rules.extend(r);
+        font_faces.extend(f);
+        pseudo_rules.extend(p);
+    }
     rules = parsed_rules;
 
     let mut root = build(&dom.document);

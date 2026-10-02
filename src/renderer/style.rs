@@ -172,6 +172,10 @@ pub enum BgSize {
     Contain,
     Cover,
     Val { w: LengthOrPct, h: LengthOrPct },
+    /// 单值宽 + auto 高：高按图源比例（"500px auto"，sprite 常用）
+    ValAuto { w: LengthOrPct },
+    /// auto 宽 + 单值高：宽按图源比例
+    AutoVal { h: LengthOrPct },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -315,7 +319,7 @@ impl Default for Resolved {
             min_height: Dimension::Auto,
             max_width: Dimension::Auto,
             max_height: Dimension::Auto,
-            margin: Rect::<LengthPercentageAuto>::auto(),
+            margin: Rect::<LengthPercentageAuto>::length(0.0),
             padding: Rect::<LengthPercentage>::zero(),
             inset: Rect {
                 top: LengthPercentageAuto::Auto,
@@ -966,6 +970,8 @@ fn bg_size(v: &lightningcss::properties::background::BackgroundSize) -> BgSize {
         BS::Cover => BgSize::Cover,
         BS::Explicit { width, height } => match (lpa_lenorpat(width), lpa_lenorpat(height)) {
             (Some(w), Some(h)) => BgSize::Val { w, h },
+            (Some(w), None) => BgSize::ValAuto { w },
+            (None, Some(h)) => BgSize::AutoVal { h },
             _ => BgSize::Auto,
         },
     }

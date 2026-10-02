@@ -216,6 +216,8 @@ fn style_of(n: &StyleNode, width: f32) -> (Style, Resolved) {
         style.align_self = Some(AlignItems::FlexStart);
     } else if block_flow {
         style.flex_direction = FlexDirection::Column;
+        // CSS 块布局语义：块级子项左对齐（taffy Stretch 对有显式宽度的子项回落成居中）
+        style.align_items = Some(AlignItems::FlexStart);
     }
     // table 容器（CSS display:table 或裸 table/thead/tbody 标签）：纵向排列行（行内 cell 横排由 table-row 的 Row 方向保证）
     let table_container = table_decl == "table"
@@ -529,13 +531,9 @@ fn collect(
         children.push(collect(taffy, c, x, y, fonts)?);
     }
     let resolved = ctx.resolved.clone();
+    // 排查工具：YZ_DEBUG_LAYOUT=1 打印每节点布局尺寸
     if std::env::var("YZ_DEBUG_LAYOUT").is_ok() {
-        eprintln!(
-            "[layout] <{}> x={x:.0} y={y:.0} w={nw:.0} h={nh:.0} kids={} decls={:?}",
-            ctx.tag,
-            children.len(),
-            ctx.decls
-        );
+        eprintln!("[layout] <{}> x={x:.0} y={y:.0} w={nw:.0} h={nh:.0} kids={}", ctx.tag, children.len());
     }
     let mut node = PaintNode {
         x,

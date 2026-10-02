@@ -722,6 +722,21 @@ fn draw_bg_layer(pixmap: &mut Pixmap, n: &PaintNode, img: &Pixmap, layer: &BgLay
                 dh = h2;
             }
         }
+        BgSize::ValAuto { w } => {
+            // 单值宽：高按图源宽高比等比
+            let w2 = len_or_pct(w, n.w);
+            if w2 > 0.0 && img.width() > 0 {
+                dw = w2;
+                dh = img.height() as f32 * w2 / img.width() as f32;
+            }
+        }
+        BgSize::AutoVal { h } => {
+            let h2 = len_or_pct(h, n.h);
+            if h2 > 0.0 && img.height() > 0 {
+                dh = h2;
+                dw = img.width() as f32 * h2 / img.height() as f32;
+            }
+        }
     }
     // 退化尺寸防护（避免平铺死循环）
     if dw < 0.5 || dh < 0.5 {
