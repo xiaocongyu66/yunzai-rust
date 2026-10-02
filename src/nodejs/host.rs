@@ -66,8 +66,8 @@ fn ret_buf_put(s: String) -> *const c_char {
 
 /// 同步 op（node 线程直调）
 unsafe extern "C" fn op_impl(name: *const c_char, args: *const c_char) -> *const c_char {
-    let name = CStr::from_ptr(name).to_string_lossy().into_owned();
-    let args_s = CStr::from_ptr(args).to_string_lossy().into_owned();
+    let name = unsafe { CStr::from_ptr(name) }.to_string_lossy().into_owned();
+    let args_s = unsafe { CStr::from_ptr(args) }.to_string_lossy().into_owned();
     let args: J = serde_json::from_str(&args_s).unwrap_or(json!({}));
     let ret = super::ops::op_sync(&name, &args);
     ret_buf_put(serde_json::to_string(&ret).unwrap_or_else(|_| "null".to_string()))
@@ -75,8 +75,8 @@ unsafe extern "C" fn op_impl(name: *const c_char, args: *const c_char) -> *const
 
 /// 异步 op 提交：回到主 tokio 运行时执行
 unsafe extern "C" fn op_async_submit_impl(id: u64, name: *const c_char, args: *const c_char) {
-    let name = CStr::from_ptr(name).to_string_lossy().into_owned();
-    let args_s = CStr::from_ptr(args).to_string_lossy().into_owned();
+    let name = unsafe { CStr::from_ptr(name) }.to_string_lossy().into_owned();
+    let args_s = unsafe { CStr::from_ptr(args) }.to_string_lossy().into_owned();
     if let Some(handle) = MAIN_HANDLE.get() {
         let fut = async move {
             let args: J = serde_json::from_str(&args_s).unwrap_or(json!({}));

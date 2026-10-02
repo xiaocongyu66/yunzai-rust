@@ -39,7 +39,7 @@ pub const EMBED_BRIDGE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/yz_bri
 fn memfd_bridge() -> Option<PathBuf> {
     use std::io::Write;
     use std::os::fd::FromRawFd;
-    extern "C" {
+    unsafe extern "C" {
         fn memfd_create(name: *const u8, flags: u32) -> i32;
         fn ftruncate(fd: i32, length: i64) -> i32;
     }
@@ -67,7 +67,7 @@ fn memfd_bridge() -> Option<PathBuf> {
 fn shm_bridge() -> Option<PathBuf> {
     use std::io::Write;
     use std::os::fd::FromRawFd;
-    extern "C" {
+    unsafe extern "C" {
         fn shm_open(name: *const u8, oflag: i32, mode: u32) -> i32;
         fn shm_unlink(name: *const u8) -> i32;
         fn ftruncate(fd: i32, length: i64) -> i32;
