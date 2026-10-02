@@ -156,7 +156,7 @@ fn collect_font_face(ff: &lightningcss::rules::font_face::FontFaceRule, ctx: &mu
                         _ => None,
                     })
                     .collect();
-                if let Some(pick) = pick_face_url(&urls) {
+                if let Some(pick) = pick_face_url(&urls, &ctx.css_dir) {
                     // url 相对"所在 css 文件"解析成绝对路径（拼接样式表后基准不能丢）
                     src = crate::renderer::media::resolve(&pick, &ctx.css_dir);
                 }
@@ -169,13 +169,9 @@ fn collect_font_face(ff: &lightningcss::rules::font_face::FontFaceRule, ctx: &mu
     }
 }
 
-/// font-face src 多候选：取第一个本地存在的文件（相对路径基于 BASE_DIR）；都不存在则取第一个
-fn pick_face_url(urls: &[String]) -> Option<String> {
+/// font-face src 多候选：按所在样式表目录查找；都不存在则取第一个。
+fn pick_face_url(urls: &[String], base: &str) -> Option<String> {
     let first = urls.first()?;
-    let base = crate::renderer::BASE_DIR
-        .get()
-        .cloned()
-        .unwrap_or_else(|| ".".to_string());
     Some(
         urls.iter()
             .find(|u| std::fs::metadata(super::media::resolve(u, &base)).is_ok())

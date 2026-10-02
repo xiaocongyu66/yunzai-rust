@@ -153,22 +153,22 @@ fn grad_stops(stops: &[(f32, Rgba)]) -> Vec<GradientStop> {
 }
 
 /// 绘制主入口
-pub fn paint(root: &PaintNode, width: f32, height: f32, fonts: &mut super::text::TextEngine) -> Result<Vec<u8>, String> {
+pub fn paint(root: &PaintNode, width: f32, height: f32, fonts: &mut super::text::TextEngine, base_dir: &str) -> Result<Vec<u8>, String> {
     let mut pixmap = Pixmap::new(width as u32, height as u32).ok_or("pixmap create fail")?;
     pixmap.fill(Color::from_rgba8(255, 255, 255, 255));
-    draw_node(&mut pixmap, root, fonts);
+    draw_node(&mut pixmap, root, fonts, base_dir);
     pixmap.encode_png().map_err(|e| e.to_string())
 }
 
 /// 单节点绘制：结构化样式（layout 侧回填到 PaintNode.style）→ 纯几何绘制
-fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEngine) {
+fn draw_node(pixmap: &mut Pixmap, n: &PaintNode, fonts: &mut super::text::TextEngine, base_dir: &str) {
     let r = &n.style;
-    draw_node_r(pixmap, n, &r, fonts);
+    draw_node_r(pixmap, n, &r, fonts, base_dir);
 }
 
 /// 绘制顺序（CSS）：box-shadow（最底）→ background-color → background layers
 /// （第一层最上）→ <img> 内容 → border → 文本 → 子节点（z-index 稳定排序）
-fn draw_node_r(pixmap: &mut Pixmap, n: &PaintNode, r: &Resolved, fonts: &mut super::text::TextEngine) {
+fn draw_node_r(pixmap: &mut Pixmap, n: &PaintNode, r: &Resolved, fonts: &mut super::text::TextEngine, base_dir: &str) {
     if n.w <= 0.0 || n.h <= 0.0 {
         return;
     }
@@ -203,13 +203,13 @@ fn draw_node_r(pixmap: &mut Pixmap, n: &PaintNode, r: &Resolved, fonts: &mut sup
 
     // 3. 背景图层（第一层最上 → 逆序绘制）；<img> 节点不画背景图（图即内容）
     if n.tag != "img" {
-        draw_bg_layers(pixmap, n, &r.bg_layers, draw_tx, opacity, radii);
+        draw_bg_layers(pixmap, n, &r.bg_layers, draw_tx, opacity, radii, base_dir);
     }
 
     // <img> 内容：按节点矩形绘制 src 图
     if n.tag == "img" {
         if let Some(src) = &n.src {
-            if let Some(img) = crate::renderer::media::load(src, crate::renderer::BASE_DIR.get().map(String::as_str).unwrap_or(".")) {
+            if let Some(img) = crate::renderer::media::load(src, base_dir) {
                 blit_r(pixmap, &img, n.x, n.y, n.w, n.h, (n.x, n.y, n.w, n.h), radii);
             }
         }
@@ -243,14 +243,14 @@ fn draw_node_r(pixmap: &mut Pixmap, n: &PaintNode, r: &Resolved, fonts: &mut sup
             for (c, _) in ordered.iter() {
                 let mut cc = (*c).clone();
                 shift_xy(&mut cc, -n.x, -n.y);
-                draw_node(&mut tmp, &cc, fonts);
+                draw_node(&mut tmp, &cc, fonts, base_dir);
             }
             blit_r(pixmap, &tmp, n.x, n.y, n.w, n.h, (n.x, n.y, n.w, n.h), radii);
             return;
         }
     }
     for (c, cr) in ordered {
-        draw_node_r(pixmap, c, &cr, fonts);
+        draw_node_r(pixmap, c, &cr, fonts, base_dir);
     }
 }
 
@@ -615,8 +615,8 @@ fn draw_bg_layers(
     draw_tx: &Transform,
     opacity: f32,
     radii: [f32; 4],
+    base: &str,
 ) {
-    let base = crate::renderer::BASE_DIR.get().map(String::as_str).unwrap_or(".");
     for layer in layers.iter().rev() {
         match &layer.paint {
             BgPaint::Color(c) => fill_solid(pixmap, n, mul_alpha(*c, opacity), radii, draw_tx),

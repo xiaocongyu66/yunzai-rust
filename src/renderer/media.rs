@@ -41,7 +41,9 @@ pub fn load(src: &str, base_dir: &str) -> Option<Pixmap> {
         return hit.clone();
     }
     let decoded = decode_any(&key);
-    CACHE.lock().unwrap().insert(key, decoded.clone());
+    if decoded.is_some() {
+        CACHE.lock().unwrap().insert(key, decoded.clone());
+    }
     decoded
 }
 
@@ -74,11 +76,52 @@ fn decode_any(key: &str) -> Option<Pixmap> {
     let (w, h) = rgba.dimensions();
     let mut pm = Pixmap::new(w, h)?;
     for (i, px) in rgba.pixels().enumerate() {
-        if let Some(c) = tiny_skia::PremultipliedColorU8::from_rgba(px[0], px[1], px[2], px[3]) {
-            pm.pixels_mut()[i] = c;
-        }
+        pm.pixels_mut()[i] = tiny_skia::ColorU8::from_rgba(px[0], px[1], px[2], px[3]).premultiply();
     }
     Some(pm)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decoded_png_preserves_premultiplied_alpha() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("alpha.png");
+        let mut image = image::RgbaImage::new(2, 1);
+        image.put_pixel(0, 0, image::Rgba([240, 120, 60, 128]));
+        image.put_pixel(1, 0, image::Rgba([40, 20, 10, 128]));
+        image.save(&path).unwrap();
+        let decoded = load("alpha.png", dir.path().to_str().unwrap()).unwrap();
+        for (pixel, expected) in decoded.pixels().iter().zip([[120, 60, 30, 128], [20, 10, 5, 128]]) {
+            assert_eq!([pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()], expected);
+        }
+    }
+
+    #[test]
+    fn missing_image_can_be_loaded_after_creation() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_str().unwrap();
+        assert!(load("late.png", base).is_none());
+        image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]))
+            .save(dir.path().join("late.png")).unwrap();
+        assert_eq!(load("late.png", base).unwrap().pixels()[0].red(), 255);
+    }
+
+    #[test]
+    fn same_name_in_different_directories_has_distinct_cache_entries() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        for (dir, color) in [(&first, [255, 0, 0, 255]), (&second, [0, 0, 255, 255])] {
+            image::RgbaImage::from_pixel(1, 1, image::Rgba(color))
+                .save(dir.path().join("image.png")).unwrap();
+        }
+        let red = load("image.png", first.path().to_str().unwrap()).unwrap();
+        let blue = load("image.png", second.path().to_str().unwrap()).unwrap();
+        assert_eq!(red.pixels()[0].red(), 255);
+        assert_eq!(blue.pixels()[0].blue(), 255);
+    }
 }
 
 fn decode_svg(bytes: &[u8]) -> Option<Pixmap> {

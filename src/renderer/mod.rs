@@ -20,11 +20,7 @@ pub mod text;
 use serde_json::Value;
 
 /// 渲染 HTML → PNG。宽度默认 720，高度按内容自适应（上限 4096）。
-/// HTML 相对资源的基准目录（img/background url 解析）
-pub static BASE_DIR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-
 pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
-    let _ = BASE_DIR.set(base_dir.to_string());
     // 支持到 4K（3840）：宽度上限 4096；高度按内容自适应，保护上限 = 宽×4（防内存爆）
     let width = width.clamp(64, 4096) as f32;
 
@@ -70,7 +66,7 @@ pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> R
     let height = (total_h.ceil() as u32).clamp(1, out_w * 4);
 
     // 4. 光栅化
-    paint::paint(&root_paint, out_w as f32, height as f32, &mut fonts)
+    paint::paint(&root_paint, out_w as f32, height as f32, &mut fonts, base_dir)
 }
 
 /// op 层入口：JSON 参数 { html, width?, fontDirs? } → { data: base64, width, height }
