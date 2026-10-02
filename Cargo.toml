@@ -72,4 +72,5 @@ lto = false
 
 # box-shadow σ 按 CSS 规范换算（σ=blur/2）——上游直传 blur 致 1px 细线比 Chrome 浓 ~1.9 倍
 [patch.crates-io]
+ps-anyrender = { git = "https://github.com/xiaocongyu66/ps-anyrender" }
 ps-anyrender-vello-cpu = { git = "https://github.com/xiaocongyu66/ps-anyrender" }
