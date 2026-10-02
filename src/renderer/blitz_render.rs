@@ -68,7 +68,7 @@ async fn render_inner(
 
     // 2× 超采样：vello_cpu 字形/边缘 AA 为单采样，直接 1x 渲染锯齿明显；
     // 按 2x 画完后 2×2 盒滤波降回 1x，视觉上逼近 Chrome(Skia) 的平滑度。
-    const SS: u32 = 2;
+    const SS: u32 = 1; // 超采样实测观感劣化（盒滤波钝化），回退 1x 直出
     let ss_w = out_w * SS;
     let ss_h = render_height * SS;
     let rgba2 = anyrender::render_to_buffer::<anyrender_vello_cpu::VelloCpuImageRenderer, _>(
