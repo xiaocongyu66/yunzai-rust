@@ -391,8 +391,13 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
                             .decl("height")
                             .and_then(|v| v.trim().trim_end_matches("px").parse::<f32>().ok())
                             .unwrap_or(pm.height() as f32 * iw / pm.width() as f32);
-                        // 自然尺寸超出容器宽：等比缩到容器宽（img 不会主动溢出普通容器）
-                        if !has_w && width > 0.0 && iw > width {
+                        if !has_w && has_h {
+                            if let Dimension::Length(height) = st.size.height {
+                                iw = pm.width() as f32 * height / pm.height() as f32;
+                            }
+                        }
+                        // 自然尺寸超出容器宽：仅在两个方向均未指定时等比缩小。
+                        if !has_w && !has_h && width > 0.0 && iw > width {
                             ih *= width / iw;
                             iw = width;
                         }
