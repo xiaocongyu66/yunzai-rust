@@ -754,6 +754,13 @@ mod cascade_tests {
         n.children.iter().find_map(|c| find_class(c, cls))
     }
 
+    fn find_tag<'a>(n: &'a StyleNode, tag: &str) -> Option<&'a StyleNode> {
+        if n.tag == tag {
+            return Some(n);
+        }
+        n.children.iter().find_map(|c| find_tag(c, tag))
+    }
+
     fn rgb(s: &str) -> [u8; 4] {
         crate::renderer::paint::parse_color(s).unwrap()
     }
@@ -761,7 +768,7 @@ mod cascade_tests {
     #[test]
     fn specificity_beats_source_order() {
         let n = styled(r#"<style>div{color:red}.title{color:green}</style><div class="title">x</div>"#);
-        assert_eq!(rgb(n.decl("color").unwrap()), [0, 128, 0, 255]);
+        assert_eq!(rgb(find_class(&n, "title").unwrap().decl("color").unwrap()), [0, 128, 0, 255]);
     }
 
     #[test]
@@ -769,7 +776,7 @@ mod cascade_tests {
         let n = styled(
             r#"<style>.a{color:red}div{color:green !important}</style><div class="a" style="color:blue">x</div>"#,
         );
-        assert_eq!(rgb(n.decl("color").unwrap()), [0, 128, 0, 255]);
+        assert_eq!(rgb(find_class(&n, "a").unwrap().decl("color").unwrap()), [0, 128, 0, 255]);
     }
 
     #[test]
@@ -777,7 +784,7 @@ mod cascade_tests {
         let n = styled(
             r#"<style>div{color:red !important}</style><div style="color:blue !important">x</div>"#,
         );
-        assert_eq!(rgb(n.decl("color").unwrap()), [0, 0, 255, 255]);
+        assert_eq!(rgb(find_tag(&n, "div").unwrap().decl("color").unwrap()), [0, 0, 255, 255]);
     }
 
     #[test]
@@ -793,7 +800,7 @@ mod cascade_tests {
     #[test]
     fn invalid_hex_color_does_not_become_black() {
         let n = styled(r#"<style>body{color:#ffffff}div{color:#0000000}</style><div>x</div>"#);
-        assert_eq!(rgb(n.decl("color").unwrap()), [255, 255, 255, 255]);
+        assert_eq!(rgb(find_tag(&n, "div").unwrap().decl("color").unwrap()), [255, 255, 255, 255]);
     }
 
     #[test]
