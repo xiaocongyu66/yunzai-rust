@@ -140,6 +140,7 @@ use parcel_selectors::parser::NthType;
         let Some((sel, which)) = super::matcher::parse_selector_static(one) else {
             continue;
         };
+        let specificity = sel.specificity();
         if let Some(w) = which {
             ctx.pseudos.push(PseudoRule {
                 parent: sel,
@@ -151,7 +152,7 @@ use parcel_selectors::parser::NthType;
         ctx.rules.push(CssRule {
             selector: sel,
             decls: decls.iter().cloned().collect(),
-            specificity: 0,
+            specificity,
         });
     }
 }
