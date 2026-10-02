@@ -123,9 +123,12 @@ fn collect_style(st: &lightningcss::rules::style::StyleRule, ctx: &mut SheetColl
             continue;
         }
         let (body, which) = split_pseudo(one);
-        // 伪类（:hover/:nth-child 等）暂不支持，跳过
-        if which.is_none() && body.contains(':') {
-            continue;
+        // :nth-child 下方剥离；其余伪类（:hover 等）不支持，跳过
+        if which.is_none() {
+            let (nth_probe, rest) = strip_nth_child(&body);
+            if nth_probe.is_none() && rest.contains(':') {
+                continue;
+            }
         }
         if let Some(w) = which {
             let (parts, _) = compile_selector(&body);
@@ -139,11 +142,17 @@ fn collect_style(st: &lightningcss::rules::style::StyleRule, ctx: &mut SheetColl
             });
             continue;
         }
-        let (parts, spec) = compile_selector(&body);
+        // :nth-child(...) 从选择器串剥离，规则级保存（其余伪类仍不支持）
+        let (nth, body2) = strip_nth_child(&body);
+        if body2.contains(':') {
+            continue;
+        }
+        let (parts, spec) = compile_selector(&body2);
         ctx.rules.push(CssRule {
             selector: parts,
             decls: decls.iter().cloned().collect(),
             specificity: spec,
+            nth,
         });
     }
 }
@@ -262,6 +271,24 @@ fn apply_pseudo_rec(node: &mut StyleNode, rules: &[PseudoRule], ancestors: &[Nod
 }
 
 /// `div.card > .name span` → [Tag(div), Class(card), Child, Class(name), Descendant, Tag(span)]
+/// 剥离选择器串中的 :nth-child(...)（含大小写/空格形态）→ (NthSpec, 余下选择器)
+fn strip_nth_child(sel: &str) -> (Option<super::dom::NthSpec>, String) {
+    let lower = sel.to_lowercase();
+    let Some(pos) = lower.find(":nth-child(") else {
+        return (None, sel.to_string());
+    };
+    let open = pos + ":nth-child(".len();
+    let Some(rel) = sel[open..].find(')') else {
+        return (None, sel.to_string());
+    };
+    let arg = &sel[open..open + rel];
+    let nth = super::dom::parse_nth(arg);
+    let mut rest = String::with_capacity(sel.len());
+    rest.push_str(&sel[..pos]);
+    rest.push_str(&sel[open + rel + 1..]);
+    (nth, rest)
+}
+
 fn compile_selector(sel: &str) -> (Vec<SelectorPart>, u32) {
     let mut parts = Vec::new();
     let mut spec = 0u32;
@@ -544,18 +571,30 @@ struct NodeKey {
     tag: String,
     classes: Vec<String>,
     id: Option<String>,
+    /// 1-based 兄弟序号（:nth-child 用）
+    index: usize,
 }
 
 fn key_of(n: &StyleNode) -> NodeKey {
-    NodeKey { tag: n.tag.clone(), classes: n.classes.clone(), id: n.id.clone() }
+    key_at(n, 1)
+}
+
+fn key_at(n: &StyleNode, index: usize) -> NodeKey {
+    NodeKey { tag: n.tag.clone(), classes: n.classes.clone(), id: n.id.clone(), index }
 }
 
 fn apply_rec(node: &mut StyleNode, rules: &[CssRule], ancestors: &[NodeKey]) {
-    let key = key_of(node);
+    apply_at(node, rules, ancestors, 1)
+}
+
+fn apply_at(node: &mut StyleNode, rules: &[CssRule], ancestors: &[NodeKey], index: usize) {
+    let key = key_at(node, index);
 
     let mut matched_decls: BTreeMap<String, String> = BTreeMap::new();
     for rule in rules {
-        if selector_matches(&rule.selector, ancestors, &key) {
+        if selector_matches(&rule.selector, ancestors, &key)
+            && rule.nth.map(|n| n.matches(key.index)).unwrap_or(true)
+        {
             for (k, v) in &rule.decls {
                 matched_decls.insert(k.clone(), v.clone());
             }
@@ -572,8 +611,8 @@ fn apply_rec(node: &mut StyleNode, rules: &[CssRule], ancestors: &[NodeKey]) {
 
     let mut child_anc: Vec<NodeKey> = ancestors.to_vec();
     child_anc.push(key);
-    for c in node.children.iter_mut() {
-        apply_rec(c, rules, &child_anc);
+    for (i, c) in node.children.iter_mut().enumerate() {
+        apply_at(c, rules, &child_anc, i + 1);
     }
 }
 
