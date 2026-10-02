@@ -44,13 +44,14 @@ async fn render_inner(
         },
     );
 
-    // 驱动资源拉取（图片/字体异步）；net.is_empty() = 无在途请求即完成。上限防死循环
+    // 驱动资源拉取（图片/字体异步）；net.is_empty() = 无在途请求即完成。上限防死循环。
+    // 必须 await 让出线程：current-thread runtime 的 spawn 任务（fetch）依赖 poll
     for _ in 0..600 {
         document.resolve(0.0);
         if net.is_empty() {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     document.resolve(0.0);
 
