@@ -63,6 +63,20 @@ async fn render_inner(
     document.handle_messages();
     document.resolve(0.0);
 
+    // 布局稳定循环：图片等资源在 is_empty 误判/最后一轮事件后仍可能回填，
+    // 必须反复 resolve 直到根布局尺寸连续收敛，否则最底部的块没撑起来，
+    // 截图高度就比页面实际矮（实测缺 136px）。
+    let mut last_h = 0.0f32;
+    for _ in 0..40 {
+        document.resolve(0.0);
+        let h = document.root_element().final_layout().size.height;
+        if (h - last_h).abs() < 0.5 {
+            break;
+        }
+        last_h = h;
+        document.handle_messages();
+    }
+
     // ≈ TRSS element.screenshot() 语义：html/body 撑满视口不可作边界，
     // 取 body 子树的几何并集（递归累加偏移，含溢出子元素），四周再加
     // 12px 容忍 box-shadow 等非布局绘制；scale 乘成输出像素。
