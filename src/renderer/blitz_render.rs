@@ -120,7 +120,7 @@ fn subtree_union(
     let l = n.final_layout();
     let x = ox + l.location.x as f64;
     let y = oy + l.location.y as f64;
-    *rect = rect.union(&peniko::kurbo::Rect::new(
+    *rect = rect.union(peniko::kurbo::Rect::new(
         x,
         y,
         x + l.size.width as f64,
