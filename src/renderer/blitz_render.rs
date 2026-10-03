@@ -63,44 +63,13 @@ async fn render_inner(
     document.handle_messages();
     document.resolve(0.0);
 
-    // 布局稳定循环：图片等资源在 is_empty 误判/最后一轮事件后仍可能回填，
-    // 必须反复 resolve 直到根布局尺寸连续收敛，否则最底部的块没撑起来，
-    // 截图高度就比页面实际矮（实测缺 136px）。
-    let mut last_h = 0.0f32;
-    for _ in 0..40 {
-        document.resolve(0.0);
-        let h = document.root_element().final_layout().size.height;
-        if (h - last_h).abs() < 0.5 {
-            break;
-        }
-        last_h = h;
-        document.handle_messages();
-    }
-
-    // ≈ TRSS element.screenshot() 语义：html/body 撑满视口不可作边界，
-    // 取 body 子树的几何并集（递归累加偏移，含溢出子元素），四周再加
-    // 12px 容忍 box-shadow 等非布局绘制；scale 乘成输出像素。
-    let html = document.root_element();
-    let html_id = html.id;
-    let body_id = html
-        .children
-        .iter()
-        .find(|id| {
-            document
-                .get_node(**id)
-                .and_then(|n| n.element_data())
-                .map(|el| el.name.local.as_ref() == "body")
-                .unwrap_or(false)
-        })
-        .copied()
-        .unwrap_or(html_id);
-    let scale = scale.clamp(0.5, 4.0);
-    let mut union = peniko::kurbo::Rect::ZERO;
-    subtree_union(&document, body_id, 0.0, 0.0, &mut union);
-    let content_w = (union.width().ceil() as u32).clamp(64, 4096) + 12;
-    let content_h = (union.height().ceil() as u32).clamp(1, content_w * 4) + 12;
-    let out_w = ((content_w as f64 * scale).ceil() as u32).clamp(64, 8192);
-    let render_height = ((content_h as f64 * scale).ceil() as u32).clamp(1, out_w * 4);
+    // ps-blitz 已在 resolve_transforms() 中把子元素、图片溢出和 CSS
+    // transform 递归合并到根节点的 scrollable_overflow；它使用设备像素，
+    // 正是截图画布需要的边界。不要用 final_layout（只代表未变换布局盒）。
+    let overflow = *document.root_element().scrollable_overflow();
+    let out_w = (overflow.x1.ceil() as u32).clamp(64, 8192);
+    let render_height = (overflow.y1.ceil() as u32).clamp(1, out_w * 4);
+    let scale = 1.0;
 
     // 白底 + 文档 → RGBA（vello_cpu 纯 CPU 光栅化，scale 直接作为绘制密度）
     let rgba = anyrender::render_to_buffer::<anyrender_vello_cpu::VelloCpuImageRenderer, _>(
@@ -120,30 +89,6 @@ async fn render_inner(
     );
 
     encode_png(&rgba, out_w, render_height)
-}
-
-/// body 子树几何并集（taffy location 相对父，递归累加偏移），用于内容边界裁取
-fn subtree_union(
-    doc: &blitz_dom::BaseDocument,
-    id: blitz_dom::NodeId,
-    ox: f64,
-    oy: f64,
-    rect: &mut peniko::kurbo::Rect,
-) {
-    let Some(n) = doc.get_node(id) else { return };
-    if n.element_data().is_none() { return }  // 非元素节点无 final_layout
-    let l = n.final_layout();
-    let x = ox + l.location.x as f64;
-    let y = oy + l.location.y as f64;
-    *rect = rect.union(peniko::kurbo::Rect::new(
-        x,
-        y,
-        x + l.size.width as f64,
-        y + l.size.height as f64,
-    ));
-    for c in &n.children {
-        subtree_union(doc, *c, x, y, rect);
-    }
 }
 
 /// 字体目录注册进 Parley FontContext（模板 @font-face 由 stylo 经 net provider 自动拉取注册）
