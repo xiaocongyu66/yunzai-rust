@@ -14,7 +14,13 @@ use blitz_traits::shell::{ColorScheme, Viewport};
 
 /// HTML → PNG 字节。width=视口宽；scale=输出像素密度（内容宽高 × scale，直接出大图，
 /// 不降采样——等价 TRSS puppeteer 的 deviceScaleFactor 语义）。
-pub fn render(html: &str, width: u32, scale: f64, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
+pub fn render(
+    html: &str,
+    width: u32,
+    scale: f64,
+    font_dirs: &[String],
+    base_dir: &str,
+) -> Result<Vec<u8>, String> {
     // ps-blitz-net 的 Provider::new() 要求 tokio runtime 上下文；
     // 渲染入口是同步线程，这里套一个局部 current-thread runtime
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -78,9 +84,22 @@ async fn render_inner(
                 .unwrap_or(false)
         })
         .unwrap_or(root);
-    // 根 overflow 的横向范围包含视口宽度，模板内容较窄时会制造大片右侧空白；
-    // 对齐自研渲染器：横向取 body 实际布局宽度，纵向取视觉 overflow 高度。
-    let out_w = (body.final_layout().size.width.ceil() as u32).clamp(64, 8192);
+    // overflow 存储在节点局部坐标中，节点自身的 transform 尚未应用；
+    // 使用与绘制一致的矩阵取得 body 右边界，既不包含视口空白，也不截掉缩放内容。
+    let root_location = root.final_layout().location;
+    let body_location = body.final_layout().location;
+    let root_transform =
+        peniko::kurbo::Affine::translate((root_location.x as f64, root_location.y as f64))
+            * root.transform().unwrap_or_default();
+    let body_transform = if body.id == root.id {
+        root_transform
+    } else {
+        root_transform
+            * peniko::kurbo::Affine::translate((body_location.x as f64, body_location.y as f64))
+            * body.transform().unwrap_or_default()
+    };
+    let body_bounds = body_transform.transform_rect_bbox(*body.scrollable_overflow());
+    let out_w = (body_bounds.x1.ceil() as u32).clamp(64, 8192);
     let render_height = (overflow.y1.ceil() as u32).clamp(1, out_w * 4);
     let scale = 1.0;
 
@@ -134,7 +153,10 @@ fn build_font_ctx(font_dirs: &[String]) -> blitz_dom::FontContext {
 
 fn is_font_file(path: &std::path::Path) -> bool {
     matches!(
-        path.extension().and_then(|e| e.to_str()).map(|s| s.to_ascii_lowercase()).as_deref(),
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_ascii_lowercase())
+            .as_deref(),
         Some("ttf" | "otf" | "ttc" | "woff" | "woff2")
     )
 }
