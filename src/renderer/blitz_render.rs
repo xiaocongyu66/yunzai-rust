@@ -63,19 +63,49 @@ async fn render_inner(
     document.handle_messages();
     document.resolve(0.0);
 
-    // ≈ TRSS 按内容尺寸截图：html 撑满视口，输出必须以 body 的内容边界裁取，
-    // 否则视口比模板宽多少就留多少空白。scale 再乘成输出像素（deviceScaleFactor 语义）。
+    // ≈ TRSS element.screenshot() 语义：html/body 撑满视口不可作边界，
+    // 取 body 子树的几何并集（递归累加偏移，含溢出子元素），四周再加
+    // 12px 容忍 box-shadow 等非布局绘制；scale 乘成输出像素。
     let html = document.root_element();
-    let body = html
+    let html_id = html.id;
+    let body_id = html
         .children
         .iter()
-        .filter_map(|id| document.get_node(*id))
-        .find(|n| n.element_data().map(|el| el.name.local.as_ref() == "body").unwrap_or(false))
-        .unwrap_or(html);
-    let layout = body.final_layout().size;
+        .find(|id| {
+            document
+                .get_node(**id)
+                .and_then(|n| n.element_data())
+                .map(|el| el.name.local.as_ref() == "body")
+                .unwrap_or(false)
+        })
+        .copied()
+        .unwrap_or(html_id);
     let scale = scale.clamp(0.5, 4.0);
-    let content_w = (layout.width.ceil() as u32).clamp(64, 4096);
-    let content_h = (layout.height.ceil() as u32).clamp(1, content_w * 4);
+    let mut union = Rect::ZERO;
+    fn subtree_union(
+        doc: &BaseDocument,
+        id: NodeId,
+        ox: f64,
+        oy: f64,
+        rect: &mut peniko::kurbo::Rect,
+    ) {
+        let Some(n) = doc.get_node(id) else { return };
+        let l = n.final_layout();
+        let x = ox + l.location.x as f64;
+        let y = oy + l.location.y as f64;
+        *rect = rect.union(&peniko::kurbo::Rect::new(
+            x,
+            y,
+            x + l.size.width as f64,
+            y + l.size.height as f64,
+        ));
+        for c in &n.children {
+            subtree_union(doc, *c, x, y, rect);
+        }
+    }
+    subtree_union(&document, body_id, 0.0, 0.0, &mut union);
+    let content_w = (union.width().ceil() as u32).clamp(64, 4096) + 12;
+    let content_h = (union.height().ceil() as u32).clamp(1, content_w * 4) + 12;
     let out_w = ((content_w as f64 * scale).ceil() as u32).clamp(64, 8192);
     let render_height = ((content_h as f64 * scale).ceil() as u32).clamp(1, out_w * 4);
 
