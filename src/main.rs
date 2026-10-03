@@ -46,18 +46,19 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mode = args.first().map(String::as_str).unwrap_or("");
 
-    // 渲染测试：yunzai --render-test <in.html> [out.png] [width]
+    // 渲染测试：yunzai --render-test <in.html> [out.png] [width] [scale]
     if mode == "--render-test" {
         let file = args.get(1).map(String::as_str).unwrap_or("/tmp/test.html");
         let out = args.get(2).map(String::as_str).unwrap_or("/tmp/test.png");
         let width: u32 = args.get(3).and_then(|a| a.parse().ok()).unwrap_or(720);
+        let scale: f64 = args.get(4).and_then(|a| a.parse().ok()).unwrap_or(1.0);
         match std::fs::read_to_string(file) {
             Ok(html) => {
                 let base = std::path::Path::new(file)
                     .parent()
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|| ".".into());
-                match crate::renderer::render(&html, width, &[], &base) {
+                match crate::renderer::render(&html, width, scale, &[], &base) {
                     Ok(png) => {
                         std::fs::write(out, &png).ok();
                         println!("OK {} -> {} ({} bytes)", file, out, png.len());

@@ -190,9 +190,12 @@ function buildE(key, eJson) {
       // Rust 侧直接落盘返回路径（大 base64 过 bridge 曾被污染）
       // baseDir：HTML 相对资源（img/background url）的基准 = 模板目录；fontDirs：插件自带字体
       const path = await import('node:path')
+      // 自定义比例：width=视口宽（CSS 布局），scale=输出像素密度（内容宽高×scale，不降采样）。
+      // 插件可按需传 opts.width / opts.scale；未传给默认值。
       const r = await op('render', {
         html,
-        width: opts.scale ? Math.round(1280 * opts.scale) : 1280,
+        width: opts.width ?? 1280,
+        scale: opts.scale ?? 1,
         baseDir: path.dirname(file),
         fontDirs: [`${process.cwd()}/plugins/${plugin}/resources/common/font`],
       })

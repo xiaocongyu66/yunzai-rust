@@ -12,20 +12,22 @@ use blitz_html::HtmlDocument;
 use blitz_net::Provider;
 use blitz_traits::shell::{ColorScheme, Viewport};
 
-/// HTML → PNG 字节。宽度为视口宽，高度按根元素内容自适应（≈TRSS 截图行为）。
-pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
+/// HTML → PNG 字节。width=视口宽；scale=输出像素密度（内容宽高 × scale，直接出大图，
+/// 不降采样——等价 TRSS puppeteer 的 deviceScaleFactor 语义）。
+pub fn render(html: &str, width: u32, scale: f64, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
     // ps-blitz-net 的 Provider::new() 要求 tokio runtime 上下文；
     // 渲染入口是同步线程，这里套一个局部 current-thread runtime
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| format!("tokio runtime: {e}"))?;
-    rt.block_on(render_inner(html, width, font_dirs, base_dir))
+    rt.block_on(render_inner(html, width, scale, font_dirs, base_dir))
 }
 
 async fn render_inner(
     html: &str,
     width: u32,
+    scale: f64,
     font_dirs: &[String],
     base_dir: &str,
 ) -> Result<Vec<u8>, String> {
@@ -61,17 +63,24 @@ async fn render_inner(
     document.handle_messages();
     document.resolve(0.0);
 
-    // ≈ TRSS 按根元素实际尺寸截图：输出宽高取内容边界（防视口留白）
-    let layout = document.root_element().final_layout().size;
-    let out_w = (layout.width.ceil() as u32).clamp(64, 4096);
-    let render_height = (layout.height.ceil() as u32).clamp(1, out_w * 4);
+    // ≈ TRSS 按内容尺寸截图：html 撑满视口，输出必须以 body 的内容边界裁取，
+    // 否则视口比模板宽多少就留多少空白。scale 再乘成输出像素（deviceScaleFactor 语义）。
+    let html = document.root_element();
+    let body = html
+        .children
+        .iter()
+        .filter_map(|id| document.get_node(*id))
+        .find(|n| n.element_data().map(|el| el.name.local.as_ref() == "body").unwrap_or(false))
+        .unwrap_or(html);
+    let layout = body.final_layout().size;
+    let scale = scale.clamp(0.5, 4.0);
+    let content_w = (layout.width.ceil() as u32).clamp(64, 4096);
+    let content_h = (layout.height.ceil() as u32).clamp(1, content_w * 4);
+    let out_w = ((content_w as f64 * scale).ceil() as u32).clamp(64, 8192);
+    let render_height = ((content_h as f64 * scale).ceil() as u32).clamp(1, out_w * 4);
 
-    // 2× 超采样：vello_cpu 字形/边缘 AA 为单采样，直接 1x 渲染锯齿明显；
-    // 按 2x 画完后 2×2 盒滤波降回 1x，视觉上逼近 Chrome(Skia) 的平滑度。
-    const SS: u32 = 1; // 超采样实测观感劣化（盒滤波钝化），回退 1x 直出
-    let ss_w = out_w * SS;
-    let ss_h = render_height * SS;
-    let rgba2 = anyrender::render_to_buffer::<anyrender_vello_cpu::VelloCpuImageRenderer, _>(
+    // 白底 + 文档 → RGBA（vello_cpu 纯 CPU 光栅化，scale 直接作为绘制密度）
+    let rgba = anyrender::render_to_buffer::<anyrender_vello_cpu::VelloCpuImageRenderer, _>(
         |scene| {
             use peniko::kurbo::Rect;
             scene.fill(
@@ -79,36 +88,13 @@ async fn render_inner(
                 Default::default(),
                 Color::WHITE,
                 Default::default(),
-                &Rect::new(0.0, 0.0, ss_w as f64, ss_h as f64),
+                &Rect::new(0.0, 0.0, out_w as f64, render_height as f64),
             );
-            blitz_paint::paint_scene(scene, &mut *document, SS as f64, ss_w, ss_h, 0, 0);
+            blitz_paint::paint_scene(scene, &mut *document, scale, out_w, render_height, 0, 0);
         },
-        ss_w,
-        ss_h,
+        out_w,
+        render_height,
     );
-
-    // 2×2 盒滤波降采样到输出尺寸
-    let mut rgba = vec![0u8; (out_w * render_height * 4) as usize];
-    for y in 0..render_height {
-        for x in 0..out_w {
-            let (mut r, mut g, mut b, mut a) = (0u32, 0u32, 0u32, 0u32);
-            for dy in 0..SS {
-                for dx in 0..SS {
-                    let i = (((y * SS + dy) * ss_w + x * SS + dx) * 4) as usize;
-                    r += rgba2[i] as u32;
-                    g += rgba2[i + 1] as u32;
-                    b += rgba2[i + 2] as u32;
-                    a += rgba2[i + 3] as u32;
-                }
-            }
-            let n = (SS * SS) as u32;
-            let o = ((y * out_w + x) * 4) as usize;
-            rgba[o] = (r / n) as u8;
-            rgba[o + 1] = (g / n) as u8;
-            rgba[o + 2] = (b / n) as u8;
-            rgba[o + 3] = (a / n) as u8;
-        }
-    }
 
     encode_png(&rgba, out_w, render_height)
 }

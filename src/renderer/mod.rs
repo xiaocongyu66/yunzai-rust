@@ -23,16 +23,16 @@ use serde_json::Value;
 /// 渲染 HTML → PNG。宽度默认 720，高度按内容自适应（上限 4096）。
 /// 默认走 Blitz 引擎（stylo 样式 + taffy 布局 + vello_cpu 光栅化）；
 /// 环境变量 YZ_RENDERER=legacy 切回自研管线（差分对比用）。
-pub fn render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
+pub fn render(html: &str, width: u32, scale: f64, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
     if std::env::var("YZ_RENDERER").as_deref() == Ok("legacy") {
         legacy_render(html, width, font_dirs, base_dir)
     } else {
-        blitz_render::render(html, width, font_dirs, base_dir)
+        blitz_render::render(html, width, scale, font_dirs, base_dir)
     }
 }
 
 /// 旧自研管线：html5ever + 自研级联 + taffy 0.5 + cosmic-text + tiny-skia
-fn legacy_render(html: &str, width: u32, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
+fn legacy_render(html: &str, width: u32, _scale: f64, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
     let base_path = std::path::Path::new(base_dir);
     let base_path = if base_path.is_absolute() {
         base_path.to_path_buf()
@@ -111,7 +111,7 @@ mod resource_tests {
         ] {
             let html = format!("<style>body{{margin:0;width:64px;height:32px}}div{{width:16px;height:16px}}</style>{source}<div></div>");
             for base in [relative, root.path().to_str().unwrap()] {
-                let png = super::render(&html, 64, &[], base).unwrap();
+                let png = super::render(&html, 64, 1.0, &[], base).unwrap();
                 let image = image::load_from_memory(&png).unwrap().to_rgba8();
                 assert_eq!(image.get_pixel(8, 8).0, expected, "{source}, base={base}");
             }
@@ -140,7 +140,7 @@ mod resource_tests {
             ("css/import.css", [0, 0, 255, 255]),
         ] {
             let html = format!("<style>body{{margin:0;width:64px;height:32px}}div{{width:16px;height:16px}}</style><link rel='stylesheet' href='{sheet}'><div></div>");
-            let png = super::render(&html, 64, &[], root.path().to_str().unwrap()).unwrap();
+            let png = super::render(&html, 64, 1.0, &[], root.path().to_str().unwrap()).unwrap();
             let image = image::load_from_memory(&png).unwrap().to_rgba8();
             assert_eq!(image.get_pixel(8, 8).0, expected, "{sheet}");
         }
@@ -159,12 +159,13 @@ pub fn render_op(args: &Value) -> Value {
         .and_then(Value::as_str)
         .unwrap_or(".");
     let width = args.get("width").and_then(Value::as_u64).unwrap_or(720) as u32;
+    let scale = args.get("scale").and_then(Value::as_f64).unwrap_or(1.0) as f64;
     let font_dirs: Vec<String> = args
         .get("fontDirs")
         .and_then(Value::as_array)
         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
-    match render(html, width, &font_dirs, base_dir) {
+    match render(html, width, scale, &font_dirs, base_dir) {
         Ok(png) => {
             // 直接落盘返回路径：大 base64 过 bridge 传输曾被污染（PNG 头前混入垃圾字节）
             let dir = std::path::Path::new("data/render");

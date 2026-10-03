@@ -42,6 +42,8 @@ pub struct NodeCtx {
     pub src: Option<String>,
     pub family: Option<String>,
     pub tag: String,
+    /// 调试定位用：class 串
+    pub cls: String,
     /// letter-spacing（px）
     pub letter_spacing: f32,
     /// ellipsis 截断的定宽约束（measure 间传递：min-content 等无定宽 pass 复用）
@@ -307,6 +309,56 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
         parent_align: TextAlign,
         base_dir: &str,
     ) -> Result<taffy::NodeId, String> {
+        // 行内流近似：块容器的孩子全部是 inline（含嵌套）时，把自身文本与
+        // inline 孩子的文本按序拼接成单一文本叶子——"文本+<span>混排"回到一行
+        // （如 .copyright 的版本号 span），否则 span 被块流竖排脱离文本
+        if !n.children.is_empty() {
+            let inline_disp = |c: &StyleNode| match c.decl("display").map(str::trim) {
+                None => true,
+                Some(v) => matches!(v, "inline" | "inline-block" | "inline-flex" | "inline-table"),
+            };
+            let all_inline = n.children.iter().all(|c| {
+                inline_disp(c) && super::dom::tag_inline(&c.tag)
+            });
+            if std::env::var("YZ_DEBUG_TEXT").is_ok() && !n.children.is_empty() && !all_inline {
+                let bad: Vec<String> = n.children.iter().filter(|c| !(c.decl("display").is_none() && super::dom::tag_inline(&c.tag))).map(|c| format!("{}(d={:?})", c.tag, c.decl("display"))).collect();
+                if bad.len() < 4 {
+                    eprintln!("[merge?] <{}> kids={} bad={:?}", n.tag, n.children.len(), bad);
+                }
+            }
+            if all_inline {
+                fn gather(c: &StyleNode, out: &mut String) {
+                    if !out.is_empty() && !c.text.is_empty() {
+                        let last = out.chars().last().unwrap();
+                        let first = c.text.chars().next().unwrap();
+                        if (last.is_alphanumeric() || last == '.' || last == '%')
+                            && (first.is_alphanumeric() || first == '.')
+                        {
+                            out.push(' ');
+                        }
+                    }
+                    out.push_str(&c.text);
+                    for cc in &c.children {
+                        gather(cc, out);
+                    }
+                }
+                let mut merged = n.text.clone();
+                for c in &n.children {
+                    gather(c, &mut merged);
+                }
+                let flat = StyleNode {
+                    tag: n.tag.clone(),
+                    id: n.id.clone(),
+                    classes: n.classes.clone(),
+                    decls: n.decls.clone(),
+                    important_decls: BTreeMap::new(),
+                    text: merged,
+                    children: Vec::new(),
+                    src: n.src.clone(),
+                };
+                return add(taffy, fonts, &flat, width, parent_font, parent_align, base_dir);
+            }
+        }
         let (st, rslv) = style_of(n, width);
         let (font_size, weight, color, lh, align, family) = text_info(n, parent_font, parent_align);
         // white-space / text-overflow / letter-spacing（decls 透传，测量与绘制共用判定）
