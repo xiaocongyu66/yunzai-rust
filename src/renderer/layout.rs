@@ -348,6 +348,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
                 }
                 let flat = StyleNode {
                     tag: n.tag.clone(),
+            cls: n.classes.join(" "),
                     id: n.id.clone(),
                     classes: n.classes.clone(),
                     decls: n.decls.clone(),
@@ -591,6 +592,7 @@ fn collect(
         src: None,
         family: None,
         tag: String::new(),
+        cls: String::new(),
         letter_spacing: 0.0,
         ellip_w: None,
         resolved: Resolved::default(),

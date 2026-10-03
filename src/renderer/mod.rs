@@ -25,7 +25,7 @@ use serde_json::Value;
 /// 环境变量 YZ_RENDERER=legacy 切回自研管线（差分对比用）。
 pub fn render(html: &str, width: u32, scale: f64, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
     if std::env::var("YZ_RENDERER").as_deref() == Ok("legacy") {
-        legacy_render(html, width, font_dirs, base_dir)
+        legacy_render(html, width, scale, font_dirs, base_dir)
     } else {
         blitz_render::render(html, width, scale, font_dirs, base_dir)
     }
