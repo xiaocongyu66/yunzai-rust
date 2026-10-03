@@ -348,7 +348,6 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
                 }
                 let flat = StyleNode {
                     tag: n.tag.clone(),
-            cls: n.classes.join(" "),
                     id: n.id.clone(),
                     classes: n.classes.clone(),
                     decls: n.decls.clone(),
@@ -376,6 +375,7 @@ pub fn build_tree(root: &StyleNode, width: f32, fonts: &mut TextEngine, base_dir
             src: n.src.clone(),
             family,
             tag: n.tag.clone(),
+            cls: n.classes.join(" "),
             letter_spacing: super::text::letter_spacing_px(&n.decls),
             ellip_w: None,
             resolved: rslv,
