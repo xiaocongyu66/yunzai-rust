@@ -117,6 +117,7 @@ fn subtree_union(
     rect: &mut peniko::kurbo::Rect,
 ) {
     let Some(n) = doc.get_node(id) else { return };
+    if n.element_data().is_none() { return }  // 非元素节点无 final_layout
     let l = n.final_layout();
     let x = ox + l.location.x as f64;
     let y = oy + l.location.y as f64;
