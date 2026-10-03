@@ -68,9 +68,19 @@ async fn render_inner(
     // 正是截图画布需要的边界。不要用 final_layout（只代表未变换布局盒）。
     let root = document.root_element();
     let overflow = *root.scrollable_overflow();
+    let body = root
+        .children
+        .iter()
+        .filter_map(|id| document.get_node(*id))
+        .find(|node| {
+            node.element_data()
+                .map(|el| el.name.local.as_ref() == "body")
+                .unwrap_or(false)
+        })
+        .unwrap_or(root);
     // 根 overflow 的横向范围包含视口宽度，模板内容较窄时会制造大片右侧空白；
-    // 横向使用实际布局宽度，纵向仍使用 overflow 高度保留图片/transform 溢出内容。
-    let out_w = (root.final_layout().size.width.ceil() as u32).clamp(64, 8192);
+    // 对齐自研渲染器：横向取 body 实际布局宽度，纵向取视觉 overflow 高度。
+    let out_w = (body.final_layout().size.width.ceil() as u32).clamp(64, 8192);
     let render_height = (overflow.y1.ceil() as u32).clamp(1, out_w * 4);
     let scale = 1.0;
 
