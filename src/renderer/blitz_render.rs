@@ -81,28 +81,7 @@ async fn render_inner(
         .copied()
         .unwrap_or(html_id);
     let scale = scale.clamp(0.5, 4.0);
-    let mut union = Rect::ZERO;
-    fn subtree_union(
-        doc: &BaseDocument,
-        id: NodeId,
-        ox: f64,
-        oy: f64,
-        rect: &mut peniko::kurbo::Rect,
-    ) {
-        let Some(n) = doc.get_node(id) else { return };
-        let l = n.final_layout();
-        let x = ox + l.location.x as f64;
-        let y = oy + l.location.y as f64;
-        *rect = rect.union(&peniko::kurbo::Rect::new(
-            x,
-            y,
-            x + l.size.width as f64,
-            y + l.size.height as f64,
-        ));
-        for c in &n.children {
-            subtree_union(doc, *c, x, y, rect);
-        }
-    }
+    let mut union = peniko::kurbo::Rect::ZERO;
     subtree_union(&document, body_id, 0.0, 0.0, &mut union);
     let content_w = (union.width().ceil() as u32).clamp(64, 4096) + 12;
     let content_h = (union.height().ceil() as u32).clamp(1, content_w * 4) + 12;
@@ -127,6 +106,29 @@ async fn render_inner(
     );
 
     encode_png(&rgba, out_w, render_height)
+}
+
+/// body 子树几何并集（taffy location 相对父，递归累加偏移），用于内容边界裁取
+fn subtree_union(
+    doc: &blitz_dom::BaseDocument,
+    id: blitz_dom::NodeId,
+    ox: f64,
+    oy: f64,
+    rect: &mut peniko::kurbo::Rect,
+) {
+    let Some(n) = doc.get_node(id) else { return };
+    let l = n.final_layout();
+    let x = ox + l.location.x as f64;
+    let y = oy + l.location.y as f64;
+    *rect = rect.union(&peniko::kurbo::Rect::new(
+        x,
+        y,
+        x + l.size.width as f64,
+        y + l.size.height as f64,
+    ));
+    for c in &n.children {
+        subtree_union(doc, *c, x, y, rect);
+    }
 }
 
 /// 字体目录注册进 Parley FontContext（模板 @font-face 由 stylo 经 net provider 自动拉取注册）
