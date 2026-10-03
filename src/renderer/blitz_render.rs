@@ -66,8 +66,11 @@ async fn render_inner(
     // ps-blitz 已在 resolve_transforms() 中把子元素、图片溢出和 CSS
     // transform 递归合并到根节点的 scrollable_overflow；它使用设备像素，
     // 正是截图画布需要的边界。不要用 final_layout（只代表未变换布局盒）。
-    let overflow = *document.root_element().scrollable_overflow();
-    let out_w = (overflow.x1.ceil() as u32).clamp(64, 8192);
+    let root = document.root_element();
+    let overflow = *root.scrollable_overflow();
+    // 根 overflow 的横向范围包含视口宽度，模板内容较窄时会制造大片右侧空白；
+    // 横向使用实际布局宽度，纵向仍使用 overflow 高度保留图片/transform 溢出内容。
+    let out_w = (root.final_layout().size.width.ceil() as u32).clamp(64, 8192);
     let render_height = (overflow.y1.ceil() as u32).clamp(1, out_w * 4);
     let scale = 1.0;
 
