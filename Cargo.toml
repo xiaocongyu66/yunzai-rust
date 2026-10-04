@@ -75,9 +75,9 @@ lto = false
 [patch.crates-io]
 ps-anyrender = { git = "https://github.com/xiaocongyu66/ps-anyrender" }
 ps-anyrender-vello-cpu = { git = "https://github.com/xiaocongyu66/ps-anyrender" }
-ps-blitz-paint = { git = "https://github.com/xiaocongyu66/ps-blitz", rev = "9f9fb4a820682f759ed7714b85d76b9dce15b437" }
+ps-blitz-paint = { git = "https://github.com/xiaocongyu66/ps-blitz", rev = "0a086cf8da99323e00f67b1b6fe16f614f098abe" }
 # blitz-paint 从 git 拉取后，其 workspace 成员（dom/html/net/traits）也必须同源，否则依赖图两份实例类型不匹配
-ps-blitz-dom = { git = "https://github.com/xiaocongyu66/ps-blitz", rev = "9f9fb4a820682f759ed7714b85d76b9dce15b437" }
-ps-blitz-html = { git = "https://github.com/xiaocongyu66/ps-blitz", rev = "9f9fb4a820682f759ed7714b85d76b9dce15b437" }
-ps-blitz-net = { git = "https://github.com/xiaocongyu66/ps-blitz", rev = "9f9fb4a820682f759ed7714b85d76b9dce15b437" }
-ps-blitz-traits = { git = "https://github.com/xiaocongyu66/ps-blitz", rev = "9f9fb4a820682f759ed7714b85d76b9dce15b437" }
+ps-blitz-dom = { git = "https://github.com/xiaocongyu66/ps-blitz", rev = "0a086cf8da99323e00f67b1b6fe16f614f098abe" }
+ps-blitz-html = { git = "https://github.com/xiaocongyu66/ps-blitz", rev = "0a086cf8da99323e00f67b1b6fe16f614f098abe" }
+ps-blitz-net = { git = "https://github.com/xiaocongyu66/ps-blitz", rev = "0a086cf8da99323e00f67b1b6fe16f614f098abe" }
+ps-blitz-traits = { git = "https://github.com/xiaocongyu66/ps-blitz", rev = "0a086cf8da99323e00f67b1b6fe16f614f098abe" }
