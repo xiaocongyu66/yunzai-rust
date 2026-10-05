@@ -101,9 +101,11 @@ jobs:
           esac
           archive_url="https://raw.githubusercontent.com/xiaocongyu66/yunzai-rust/69143670ffd8e41080b72f23b1bde6b523153ea4/bin/${archive}"
           echo "downloading libnode archive: ${archive_url}"
-          curl -fL --retry 5 --retry-delay 3 --retry-all-errors -o "${archive}" "${archive_url}"
+          curl --fail --location --retry 5 --retry-delay 3 --retry-all-errors --silent --show-error \
+            --output "${archive}" "${archive_url}"
           test -s "${archive}"
-          xz --test "${archive}"
+          magic=$(od -An -tx1 -N6 "${archive}" | tr -d ' \n')
+          test "${magic}" = "fd377a585a00" || { echo "::error::unexpected libnode archive bytes: ${magic}"; exit 1; }
           xz -dc "${archive}" > "dist/data/libnode/${libnode}"
           test -s "dist/data/libnode/${libnode}"
           wc -c "dist/data/libnode/${libnode}"
