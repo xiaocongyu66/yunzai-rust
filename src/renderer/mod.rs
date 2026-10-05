@@ -114,11 +114,17 @@ mod resource_tests {
         }
         std::fs::write(css.join("style.css"), "div{background:url(image.png)}").unwrap();
         std::fs::write(css.join("import.css"), "@import 'style.css';").unwrap();
-        for (source, expected) in [
-            ("<style>div{background:url(image.png)}</style>", [255, 0, 0, 255]),
-            ("<link rel='stylesheet' href='css/style.css'>", [0, 255, 0, 255]),
-            ("<link rel='stylesheet' href='css/import.css'>", [0, 255, 0, 255]),
-        ] {
+        let absolute_image = format!(
+            "<style>div{{background:url('file://{}')}}</style>",
+            root.path().join("image.png").display()
+        );
+        let cases = vec![
+            ("<style>div{background:url(image.png)}</style>".to_string(), [255, 0, 0, 255]),
+            (absolute_image, [255, 0, 0, 255]),
+            ("<link rel='stylesheet' href='css/style.css'>".to_string(), [0, 255, 0, 255]),
+            ("<link rel='stylesheet' href='css/import.css'>".to_string(), [0, 255, 0, 255]),
+        ];
+        for (source, expected) in cases {
             let html = format!("<style>body{{margin:0;width:64px;height:32px}}div{{width:16px;height:16px}}</style>{source}<div></div>");
             for base in [relative, root.path().to_str().unwrap()] {
                 let png = super::render(&html, 64, 1.0, &[], base).unwrap();
