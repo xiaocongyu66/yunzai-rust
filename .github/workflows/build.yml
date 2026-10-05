@@ -76,7 +76,9 @@ jobs:
           cp -a runtime-source/plugins/. dist/plugins/
           cp -a plugins/. dist/plugins/
           cp -a runtime-source/lib/. dist/lib/
-          cp -aL runtime-source/node_modules dist/node_modules
+          # Move the production dependency tree instead of duplicating it; the
+          # ARM runner must keep enough workspace space for the libnode payload.
+          mv runtime-source/node_modules dist/node_modules
           cp -a runtime-source/renderers/. dist/renderers/
           cp -a runtime-source/resources/. dist/resources/
           cp runtime-source/package.json dist/package.json
