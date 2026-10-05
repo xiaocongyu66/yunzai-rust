@@ -100,10 +100,26 @@ jobs:
             *) echo "unsupported release target: ${{ matrix.target }}" >&2; exit 1 ;;
           esac
           printf 'staging libnode archive: %s\n' "$archive"
-          ls -l bin
-          test -r "$archive" || { echo "missing libnode archive: $archive" >&2; exit 1; }
-          xz -dc "$archive" > "dist/data/libnode/$libnode" || { echo "cannot decompress libnode archive: $archive" >&2; exit 1; }
-          test -s "dist/data/libnode/$libnode" || { echo "empty libnode: $libnode" >&2; exit 1; }
+          if [[ ! -r "$archive" ]]; then
+            echo "::error::missing libnode archive: $archive"
+            find bin -maxdepth 1 -type f -printf '%f %s bytes\n' || true
+            exit 1
+          fi
+          archive_bytes=$(wc -c < "$archive")
+          echo "libnode archive bytes: $archive_bytes"
+          if ! xz --list "$archive"; then
+            echo "::error::invalid xz libnode archive: $archive"
+            head -c 160 "$archive" | od -An -tx1 || true
+            exit 1
+          fi
+          if ! xz -dc "$archive" > "dist/data/libnode/$libnode"; then
+            echo "::error::cannot decompress libnode archive: $archive"
+            exit 1
+          fi
+          if [[ ! -s "dist/data/libnode/$libnode" ]]; then
+            echo "::error::empty libnode: $libnode"
+            exit 1
+          fi
           wc -c "dist/data/libnode/$libnode"
 
           echo "LIBNODE_PATH=$PWD/dist/data/libnode/$libnode" >> "$GITHUB_ENV"
