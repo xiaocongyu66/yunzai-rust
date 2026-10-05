@@ -104,8 +104,10 @@ jobs:
           curl --fail --location --retry 5 --retry-delay 3 --retry-all-errors --silent --show-error \
             --output "${archive}" "${archive_url}"
           test -s "${archive}"
-          xz --test "${archive}"
-          xz -dc "${archive}" > "dist/data/libnode/${libnode}"
+          xz -dc "${archive}" > "dist/data/libnode/${libnode}" || {
+            echo "::error::cannot decompress downloaded libnode archive: ${archive}" >&2
+            exit 1
+          }
           test -s "dist/data/libnode/${libnode}"
           wc -c "dist/data/libnode/${libnode}"
 
