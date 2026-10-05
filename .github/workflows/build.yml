@@ -90,37 +90,23 @@ jobs:
 
           case "${{ matrix.target }}" in
             aarch64-unknown-linux-gnu)
-              archive=bin/libnode-linux-arm64.so.xz
+              archive=libnode-linux-arm64.so.xz
               libnode=libnode-linux-arm64.so
               ;;
             x86_64-unknown-linux-gnu)
-              archive=bin/libnode-linux-x86_64.so.xz
+              archive=libnode-linux-x86_64.so.xz
               libnode=libnode-linux-x86_64.so
               ;;
             *) echo "unsupported release target: ${{ matrix.target }}" >&2; exit 1 ;;
           esac
-          printf 'staging libnode archive: %s\n' "$archive"
-          if [[ ! -r "$archive" ]]; then
-            echo "::error::missing libnode archive: $archive"
-            find bin -maxdepth 1 -type f -printf '%f %s bytes\n' || true
-            exit 1
-          fi
-          archive_bytes=$(wc -c < "$archive")
-          echo "libnode archive bytes: $archive_bytes"
-          if ! xz --list "$archive"; then
-            echo "::error::invalid xz libnode archive: $archive"
-            head -c 160 "$archive" | od -An -tx1 || true
-            exit 1
-          fi
-          if ! xz -dc "$archive" > "dist/data/libnode/$libnode"; then
-            echo "::error::cannot decompress libnode archive: $archive"
-            exit 1
-          fi
-          if [[ ! -s "dist/data/libnode/$libnode" ]]; then
-            echo "::error::empty libnode: $libnode"
-            exit 1
-          fi
-          wc -c "dist/data/libnode/$libnode"
+          archive_url="https://raw.githubusercontent.com/xiaocongyu66/yunzai-rust/69143670ffd8e41080b72f23b1bde6b523153ea4/bin/${archive}"
+          echo "downloading libnode archive: ${archive_url}"
+          curl -fL --retry 5 --retry-delay 3 --retry-all-errors -o "${archive}" "${archive_url}"
+          test -s "${archive}"
+          xz --test "${archive}"
+          xz -dc "${archive}" > "dist/data/libnode/${libnode}"
+          test -s "dist/data/libnode/${libnode}"
+          wc -c "dist/data/libnode/${libnode}"
 
           echo "LIBNODE_PATH=$PWD/dist/data/libnode/$libnode" >> "$GITHUB_ENV"
           echo "YZ_BRIDGE_PATH=$PWD/dist/lib/yz_bridge.node" >> "$GITHUB_ENV"
