@@ -2,7 +2,7 @@
 //! taffy 布局 → blitz-paint 遍历绘制 → vello_cpu 纯 CPU 光栅化（无 GPU 依赖）。
 //!
 //! 资源（img src / background url / @font-face src）由 blitz-net Provider 统一加载：
-//! data: / file: / https 三类源全覆盖；相对路径按 base_url（file://<base_dir>/）解析。
+//! data: / file: / https 三类源全覆盖；相对路径按规范化的 file base URL 解析。
 
 use std::sync::Arc;
 
@@ -38,7 +38,7 @@ async fn render_inner(
     base_dir: &str,
 ) -> Result<Vec<u8>, String> {
     let width = width.clamp(64, 4096);
-    let base_url = format!("file://{}/", base_dir.trim_end_matches('/'));
+    let base_url = absolute_file_url(base_dir)?;
     let net = Arc::new(Provider::new(None));
 
     let mut document = HtmlDocument::from_html(
@@ -121,6 +121,30 @@ async fn render_inner(
     );
 
     encode_png(&rgba, out_w, render_height)
+}
+
+fn absolute_file_url(base_dir: &str) -> Result<String, String> {
+    let path = std::path::Path::new(base_dir);
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| format!("无法解析资源基准目录: {e}"))?
+            .join(path)
+    };
+    let mut url = String::from("file://");
+    for component in path.to_string_lossy().trim_end_matches('/').chars() {
+        match component {
+            '%' => url.push_str("%25"),
+            '#' => url.push_str("%23"),
+            '?' => url.push_str("%3F"),
+            ' ' => url.push_str("%20"),
+            '\\' => url.push('/'),
+            c => url.push(c),
+        }
+    }
+    url.push('/');
+    Ok(url)
 }
 
 /// 字体目录注册进 Parley FontContext（模板 @font-face 由 stylo 经 net provider 自动拉取注册）

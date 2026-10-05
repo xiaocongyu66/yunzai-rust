@@ -24,23 +24,33 @@ use serde_json::Value;
 /// 默认走 Blitz 引擎（stylo 样式 + taffy 布局 + vello_cpu 光栅化）；
 /// 环境变量 YZ_RENDERER=legacy 切回自研管线（差分对比用）。
 pub fn render(html: &str, width: u32, scale: f64, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
+    let base_dir = normalize_base_dir(base_dir)?;
     if std::env::var("YZ_RENDERER").as_deref() == Ok("legacy") {
-        legacy_render(html, width, scale, font_dirs, base_dir)
+        legacy_render(html, width, scale, font_dirs, &base_dir)
     } else {
-        blitz_render::render(html, width, scale, font_dirs, base_dir)
+        blitz_render::render(html, width, scale, font_dirs, &base_dir)
     }
+}
+
+/// Convert the caller's filesystem base into one stable absolute path before
+/// either renderer resolves document or stylesheet-relative resources.
+fn normalize_base_dir(base_dir: &str) -> Result<String, String> {
+    let path = std::path::Path::new(base_dir);
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| format!("无法解析资源基准目录: {e}"))?
+            .join(path)
+    };
+    Ok(path.to_string_lossy().into_owned())
 }
 
 /// 旧自研管线：html5ever + 自研级联 + taffy 0.5 + cosmic-text + tiny-skia
 fn legacy_render(html: &str, width: u32, _scale: f64, font_dirs: &[String], base_dir: &str) -> Result<Vec<u8>, String> {
-    let base_path = std::path::Path::new(base_dir);
-    let base_path = if base_path.is_absolute() {
-        base_path.to_path_buf()
-    } else {
-        std::env::current_dir().map_err(|e| format!("无法解析资源基准目录: {e}"))?.join(base_path)
-    };
-    let base_dir = base_path.to_string_lossy();
-    let base_dir = base_dir.as_ref();
+    // The public entry point has already normalized this path. Keeping the
+    // legacy pipeline on the same absolute base preserves its CSS directory rules.
+
     // 支持到 4K（3840）：宽度上限 4096；高度按内容自适应，保护上限 = 宽×4（防内存爆）
     let width = width.clamp(64, 4096) as f32;
 
@@ -120,7 +130,9 @@ mod resource_tests {
 
     #[test]
     fn external_and_imported_stylesheets_use_their_own_image_directory() {
-        let root = tempfile::tempdir().unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let root = tempfile::tempdir_in(&cwd).unwrap();
+        let relative = root.path().strip_prefix(&cwd).unwrap().to_str().unwrap();
         let css = root.path().join("css");
         let nested = css.join("nested");
         std::fs::create_dir_all(&nested).unwrap();
@@ -140,9 +152,11 @@ mod resource_tests {
             ("css/import.css", [0, 0, 255, 255]),
         ] {
             let html = format!("<style>body{{margin:0;width:64px;height:32px}}div{{width:16px;height:16px}}</style><link rel='stylesheet' href='{sheet}'><div></div>");
-            let png = super::render(&html, 64, 1.0, &[], root.path().to_str().unwrap()).unwrap();
-            let image = image::load_from_memory(&png).unwrap().to_rgba8();
-            assert_eq!(image.get_pixel(8, 8).0, expected, "{sheet}");
+            for base in [relative, root.path().to_str().unwrap()] {
+                let png = super::render(&html, 64, 1.0, &[], base).unwrap();
+                let image = image::load_from_memory(&png).unwrap().to_rgba8();
+                assert_eq!(image.get_pixel(8, 8).0, expected, "{sheet}, base={base}");
+            }
         }
     }
 }
