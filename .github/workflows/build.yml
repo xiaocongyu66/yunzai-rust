@@ -93,9 +93,12 @@ jobs:
             x86_64-unknown-linux-gnu) LIBNODE=libnode-linux-x86_64.so ;;
             *) echo "unsupported release target: ${{ matrix.target }}" >&2; exit 1 ;;
           esac
-          test -f "bin/$LIBNODE.xz"
-          xz -d -c "bin/$LIBNODE.xz" > "dist/data/libnode/$LIBNODE"
-          test -s "dist/data/libnode/$LIBNODE"
+          ARCHIVE="bin/${LIBNODE}.xz"
+          echo "staging libnode archive: ${ARCHIVE}"
+          ls -l "${ARCHIVE}"
+          test -f "${ARCHIVE}"
+          xz --decompress --stdout "${ARCHIVE}" > "dist/data/libnode/${LIBNODE}"
+          test -s "dist/data/libnode/${LIBNODE}"
 
           echo "LIBNODE_PATH=$PWD/dist/data/libnode/$LIBNODE" >> "$GITHUB_ENV"
           echo "YZ_BRIDGE_PATH=$PWD/dist/lib/yz_bridge.node" >> "$GITHUB_ENV"
