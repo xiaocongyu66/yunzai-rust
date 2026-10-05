@@ -89,21 +89,24 @@ jobs:
           cp "target/${{ matrix.target }}/release/$EXT" dist/lib/yz_bridge.node
 
           case "${{ matrix.target }}" in
-            aarch64-unknown-linux-gnu) LIBNODE=libnode-linux-arm64.so ;;
-            x86_64-unknown-linux-gnu) LIBNODE=libnode-linux-x86_64.so ;;
+            aarch64-unknown-linux-gnu)
+              archive=bin/libnode-linux-arm64.so.xz
+              libnode=libnode-linux-arm64.so
+              ;;
+            x86_64-unknown-linux-gnu)
+              archive=bin/libnode-linux-x86_64.so.xz
+              libnode=libnode-linux-x86_64.so
+              ;;
             *) echo "unsupported release target: ${{ matrix.target }}" >&2; exit 1 ;;
           esac
-          ARCHIVE="bin/${LIBNODE}.xz"
-          echo "staging libnode archive: ${ARCHIVE}"
-          ls -lh "${ARCHIVE}"
-          test -f "${ARCHIVE}"
-          xz --test "${ARCHIVE}"
-          xz --decompress --stdout "${ARCHIVE}" > "dist/data/libnode/${LIBNODE}"
-          ls -lh "dist/data/libnode/${LIBNODE}"
-          test -s "dist/data/libnode/${LIBNODE}"
-          wc -c "dist/data/libnode/${LIBNODE}"
+          printf 'staging libnode archive: %s\n' "$archive"
+          test -r "$archive"
+          xz --test "$archive"
+          xz --decompress --stdout "$archive" > "dist/data/libnode/$libnode"
+          test -s "dist/data/libnode/$libnode"
+          wc -c "dist/data/libnode/$libnode"
 
-          echo "LIBNODE_PATH=$PWD/dist/data/libnode/$LIBNODE" >> "$GITHUB_ENV"
+          echo "LIBNODE_PATH=$PWD/dist/data/libnode/$libnode" >> "$GITHUB_ENV"
           echo "YZ_BRIDGE_PATH=$PWD/dist/lib/yz_bridge.node" >> "$GITHUB_ENV"
           find dist -maxdepth 3 -type f -printf '%P\\n' | sort
 
