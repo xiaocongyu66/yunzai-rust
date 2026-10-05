@@ -95,9 +95,13 @@ jobs:
           esac
           ARCHIVE="bin/${LIBNODE}.xz"
           echo "staging libnode archive: ${ARCHIVE}"
-          ls -l "${ARCHIVE}"
+          ls -lh "${ARCHIVE}"
+          file "${ARCHIVE}"
           test -f "${ARCHIVE}"
+          xz --test "${ARCHIVE}"
           xz --decompress --stdout "${ARCHIVE}" > "dist/data/libnode/${LIBNODE}"
+          ls -lh "dist/data/libnode/${LIBNODE}"
+          file "dist/data/libnode/${LIBNODE}"
           test -s "dist/data/libnode/${LIBNODE}"
 
           echo "LIBNODE_PATH=$PWD/dist/data/libnode/$LIBNODE" >> "$GITHUB_ENV"
