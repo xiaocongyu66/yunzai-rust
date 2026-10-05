@@ -124,9 +124,21 @@ jobs:
           esac
           echo "LIBNODE_PATH=$PWD/dist/data/libnode/$libnode" >> "$GITHUB_ENV"
           echo "YZ_BRIDGE_PATH=$PWD/dist/lib/yz_bridge.node" >> "$GITHUB_ENV"
-          test -x dist/bin/yunzai
-          test -s dist/lib/yz_bridge.node
-          test -s dist/data/libnode/$libnode
+          if [[ ! -x dist/bin/yunzai ]]; then
+            echo "::error::missing executable: dist/bin/yunzai"
+            ls -l dist/bin || true
+            exit 1
+          fi
+          if [[ ! -s dist/lib/yz_bridge.node ]]; then
+            echo "::error::missing bridge: dist/lib/yz_bridge.node"
+            ls -l dist/lib || true
+            exit 1
+          fi
+          if [[ ! -s "dist/data/libnode/$libnode" ]]; then
+            echo "::error::missing libnode: dist/data/libnode/$libnode"
+            ls -l dist/data/libnode || true
+            exit 1
+          fi
 
       - name: Validate complete runtime bundle
         run: bash scripts/bundle-smoke.sh dist "$GITHUB_WORKSPACE"
