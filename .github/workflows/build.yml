@@ -124,7 +124,7 @@ jobs:
           esac
           echo "LIBNODE_PATH=$PWD/dist/data/libnode/$libnode" >> "$GITHUB_ENV"
           echo "YZ_BRIDGE_PATH=$PWD/dist/lib/yz_bridge.node" >> "$GITHUB_ENV"
-          find dist -maxdepth 3 -type f -printf '%P\\n' | sort
+          find dist -maxdepth 3 -type f | sort || true
 
       - name: Validate complete runtime bundle
         run: bash scripts/bundle-smoke.sh dist "$GITHUB_WORKSPACE"
