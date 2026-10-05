@@ -55,6 +55,33 @@ jobs:
           ref: 79a79c3defd9111429cd1da2acd120f22e68aa29
           path: runtime-source
 
+      - name: Prepare libnode runtime
+        run: |
+          mkdir -p dist/data/libnode
+          case "${{ matrix.target }}" in
+            aarch64-unknown-linux-gnu)
+              archive=libnode-linux-arm64.so.xz
+              libnode=libnode-linux-arm64.so
+              ;;
+            x86_64-unknown-linux-gnu)
+              archive=libnode-linux-x86_64.so.xz
+              libnode=libnode-linux-x86_64.so
+              ;;
+            *) echo "unsupported release target: ${{ matrix.target }}" >&2; exit 1 ;;
+          esac
+          archive_url="https://raw.githubusercontent.com/xiaocongyu66/yunzai-rust/69143670ffd8e41080b72f23b1bde6b523153ea4/bin/${archive}"
+          echo "downloading libnode archive: ${archive_url}"
+          curl --fail --location --retry 5 --retry-delay 3 --retry-all-errors --silent --show-error \
+            --output "/tmp/${archive}" "${archive_url}"
+          test -s "/tmp/${archive}"
+          xz -dc "/tmp/${archive}" > "dist/data/libnode/${libnode}" || {
+            echo "::error::cannot decompress downloaded libnode archive: ${archive}" >&2
+            exit 1
+          }
+          test -s "dist/data/libnode/${libnode}"
+          wc -c "dist/data/libnode/${libnode}"
+          rm -f "/tmp/${archive}"
+
       - name: Install production JavaScript runtime
         working-directory: runtime-source
         run: |
@@ -91,28 +118,10 @@ jobs:
           cp "target/${{ matrix.target }}/release/$EXT" dist/lib/yz_bridge.node
 
           case "${{ matrix.target }}" in
-            aarch64-unknown-linux-gnu)
-              archive=libnode-linux-arm64.so.xz
-              libnode=libnode-linux-arm64.so
-              ;;
-            x86_64-unknown-linux-gnu)
-              archive=libnode-linux-x86_64.so.xz
-              libnode=libnode-linux-x86_64.so
-              ;;
+            aarch64-unknown-linux-gnu) libnode=libnode-linux-arm64.so ;;
+            x86_64-unknown-linux-gnu) libnode=libnode-linux-x86_64.so ;;
             *) echo "unsupported release target: ${{ matrix.target }}" >&2; exit 1 ;;
           esac
-          archive_url="https://raw.githubusercontent.com/xiaocongyu66/yunzai-rust/69143670ffd8e41080b72f23b1bde6b523153ea4/bin/${archive}"
-          echo "downloading libnode archive: ${archive_url}"
-          curl --fail --location --retry 5 --retry-delay 3 --retry-all-errors --silent --show-error \
-            --output "${archive}" "${archive_url}"
-          test -s "${archive}"
-          xz -dc "${archive}" > "dist/data/libnode/${libnode}" || {
-            echo "::error::cannot decompress downloaded libnode archive: ${archive}" >&2
-            exit 1
-          }
-          test -s "dist/data/libnode/${libnode}"
-          wc -c "dist/data/libnode/${libnode}"
-
           echo "LIBNODE_PATH=$PWD/dist/data/libnode/$libnode" >> "$GITHUB_ENV"
           echo "YZ_BRIDGE_PATH=$PWD/dist/lib/yz_bridge.node" >> "$GITHUB_ENV"
           find dist -maxdepth 3 -type f -printf '%P\\n' | sort
