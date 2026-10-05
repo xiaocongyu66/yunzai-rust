@@ -232,11 +232,11 @@ globalThis.__yz_buildE = buildE
 globalThis.Bot = new Proxy({}, {
   get(_, prop) {
     if (prop === 'then') return undefined
-    if (prop === 'uin' || prop === 'bots') return op('bot_get', { prop })
+    if (prop === 'uin' || prop === 'bots') return rawOp('bot_get', { prop })
     if (prop === 'express') return __yzExpress
     if (prop === 'server') return __yzServer
     if (prop === 'adapter') {
-      const ids = JSON.parse(op('bot_get', { prop: 'bots' }) || '[]')
+      const ids = rawOp('bot_get', { prop: 'bots' }) || {}
       const first = Object.keys(ids)[0]
       return first ? [first] : []
     }
