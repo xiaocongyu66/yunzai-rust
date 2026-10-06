@@ -32,6 +32,7 @@ fn clone_plugin(dir: &std::path::Path, name: &str, url: &str) -> bool {
 }
 
 #[tokio::test]
+#[ignore = "requires external community repositories and a packaged Node runtime"]
 async fn community_plugins_loading() {
     let _dumper = LogDumper;
     let dir = tempfile::tempdir().unwrap();
