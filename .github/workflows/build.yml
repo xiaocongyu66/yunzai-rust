@@ -87,7 +87,7 @@ jobs:
         working-directory: runtime-source
         run: |
           corepack enable
-          printf 'node-linker=hoisted\n' > .npmrc
+          printf 'node-linker=hoisted\nshamefully-hoist=true\n' > .npmrc
           pnpm install --prod --no-frozen-lockfile
           test -f package.json
           test -f pnpm-lock.yaml
