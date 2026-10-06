@@ -109,6 +109,9 @@ jobs:
           # Materialize the production dependency tree so the artifact does not
           # depend on pnpm's symlinks or hidden virtual-store directories.
           cp -aL runtime-source/node_modules/. dist/node_modules/
+          if [[ -d runtime-source/node_modules/.pnpm/node_modules ]]; then
+            cp -aL runtime-source/node_modules/.pnpm/node_modules/. dist/node_modules/
+          fi
           rm -rf dist/node_modules/.pnpm dist/node_modules/.modules.yaml
           if [[ -f dist/node_modules/lodash/index.js ]]; then
             sed -i 's#../../../node_modules/es-toolkit/#../es-toolkit/#' dist/node_modules/lodash/index.js
