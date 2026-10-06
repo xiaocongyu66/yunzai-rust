@@ -54,6 +54,22 @@ fn host() -> Option<&'static YzHostFns> {
     HOST.lock().as_ref().map(|p| unsafe { &**p })
 }
 
+fn read_cstr(ptr: *const c_char) -> String {
+    if ptr.is_null() {
+        return String::new();
+    }
+    unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned()
+}
+
+fn call_on_ready(host: &YzHostFns) {
+    unsafe { (host.on_ready)() }
+}
+
+fn call_op(host: &YzHostFns, name: &CString, args: &CString) -> String {
+    let ret = unsafe { (host.op)(name.as_ptr(), args.as_ptr()) };
+    read_cstr(ret)
+}
+
 /// tsfn 在 node JS 线程创建（ready），但 dispatch_cmd 在宿主 tokio 线程调用——必须全局共享
 static CMD_TSFN: once_cell::sync::Lazy<
     DefSync<Option<ThreadsafeFunction<String, ErrorStrategy::CalleeHandled>>>,
@@ -83,7 +99,7 @@ static BRIDGE_FNS: BridgeFns = BridgeFns {
 
 /// 宿主 → tsfn 投递指令
 unsafe extern "C" fn dispatch_cmd(cmd: *const c_char) -> c_int {
-    let json = CStr::from_ptr(cmd).to_string_lossy().into_owned();
+    let json = read_cstr(cmd);
     let guard = CMD_TSFN.lock();
     match guard.as_ref() {
         Some(tsfn) => {
@@ -100,7 +116,7 @@ unsafe extern "C" fn dispatch_cmd(cmd: *const c_char) -> c_int {
 
 /// 宿主完成异步 op → 唤醒 op_async 的 await
 unsafe extern "C" fn complete_async(id: u64, json: *const c_char) {
-    let val = CStr::from_ptr(json).to_string_lossy().into_owned();
+    let val = read_cstr(json);
     if let Some(tx) = PENDING_OP.lock().remove(&id) {
         let _ = tx.send(val);
     }
@@ -126,7 +142,7 @@ pub fn ready(env: Env, dispatcher: JsFunction) -> Result<()> {
     }
     match host() {
         Some(h) => {
-            unsafe { (h.on_ready)() };
+            call_on_ready(h);
             Ok(())
         }
         None => Err(Error::new(Status::GenericFailure, "yz-bridge: host not initialized")),
@@ -140,8 +156,7 @@ pub fn op(name: String, args: String) -> Result<String> {
         Some(h) => {
             let c_name = CString::new(name)?;
             let c_args = CString::new(args)?;
-            let ret = unsafe { (h.op)(c_name.as_ptr(), c_args.as_ptr()) };
-            let s = unsafe { CStr::from_ptr(ret).to_string_lossy().into_owned() };
+            let s = call_op(h, &c_name, &c_args);
             Ok(s)
         }
         None => Ok(r#"{"error":"bridge host not initialized"}"#.to_string()),
