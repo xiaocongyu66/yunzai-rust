@@ -74,7 +74,7 @@ fn submit_async(host: &YzHostFns, id: u64, name: &CString, args: &CString) {
     unsafe { (host.op_async_submit)(id, name.as_ptr(), args.as_ptr()) }
 }
 
-fn resolve(host: &YzHostFns, id: u64, result: &CString) {
+fn resolve_host(host: &YzHostFns, id: u64, result: &CString) {
     unsafe { (host.resolve)(id, result.as_ptr()) }
 }
 
@@ -208,7 +208,7 @@ pub async fn op_async(name: String, args: String) -> Result<String> {
 pub fn resolve(id: f64, result: String) -> Result<()> {
     if let Some(h) = host() {
         let c = CString::new(result)?;
-        resolve(h, id as u64, &c);
+        resolve_host(h, id as u64, &c);
     }
     Ok(())
 }
