@@ -92,7 +92,6 @@ jobs:
 
       - name: Stage complete runtime bundle
         run: |
-          rm -rf dist
           mkdir -p dist/bin dist/lib dist/config dist/data/libnode dist/plugins dist/renderers dist/resources
           cp "target/${{ matrix.target }}/release/yunzai" dist/bin/yunzai
           chmod +x dist/bin/yunzai
