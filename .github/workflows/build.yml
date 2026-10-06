@@ -41,7 +41,7 @@ jobs:
         run: |
           # 先单独编 bridge 拿 napi 桥，供主程序编译期内嵌
           cargo build -p yz-bridge --release --target ${{ matrix.target }}
-          BRIDGE=$(find "target/${{ matrix.target }}/release" -maxdepth 1 -type f -name 'libyz_bridge.*' -printf '%f\n' | head -1 || true)
+          BRIDGE=$(find "target/${{ matrix.target }}/release" -maxdepth 1 -type f \( -name 'libyz_bridge.so' -o -name 'libyz_bridge.dylib' \) -printf '%f\n' | head -1 || true)
           if [ -n "$BRIDGE" ]; then
             export YZ_BRIDGE_BIN="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/$BRIDGE"
             echo "YZ_BRIDGE_BIN=$YZ_BRIDGE_BIN" >> "$GITHUB_ENV"
@@ -115,9 +115,10 @@ jobs:
           cp runtime-source/LICENSE dist/TRSS-Yunzai-LICENSE
           cp src/nodejs/host.mjs dist/host.mjs
 
-          EXT=$(find "target/${{ matrix.target }}/release" -maxdepth 1 -type f -name 'libyz_bridge.*' -printf '%f\n' | head -1 || true)
+          EXT=$(find "target/${{ matrix.target }}/release" -maxdepth 1 -type f \( -name 'libyz_bridge.so' -o -name 'libyz_bridge.dylib' \) -printf '%f\n' | head -1 || true)
           test -n "$EXT"
           cp "target/${{ matrix.target }}/release/$EXT" dist/lib/yz_bridge.node
+          file "dist/lib/yz_bridge.node" | grep -E 'ELF .* shared object|Mach-O .* dynamically linked shared library'
 
           case "${{ matrix.target }}" in
             aarch64-unknown-linux-gnu) libnode=libnode-linux-arm64.so ;;
