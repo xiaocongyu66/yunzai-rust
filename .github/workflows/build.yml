@@ -41,7 +41,7 @@ jobs:
         run: |
           # 先单独编 bridge 拿 napi 桥，供主程序编译期内嵌
           cargo build -p yz-bridge --release --target ${{ matrix.target }}
-          BRIDGE=$(ls target/${{ matrix.target }}/release/ | grep -E '^libyz_bridge\.(so|dylib)$' | head -1 || true)
+          BRIDGE=$(find "target/${{ matrix.target }}/release" -maxdepth 1 -type f -name 'libyz_bridge.*' -printf '%f\n' | head -1 || true)
           if [ -n "$BRIDGE" ]; then
             export YZ_BRIDGE_BIN="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/$BRIDGE"
             echo "embed bridge: $YZ_BRIDGE_BIN"
@@ -114,7 +114,7 @@ jobs:
           cp runtime-source/LICENSE dist/TRSS-Yunzai-LICENSE
           cp src/nodejs/host.mjs dist/host.mjs
 
-          EXT=$(ls target/${{ matrix.target }}/release/ | grep -E '^libyz_bridge\\.(so|dylib)$' | head -1 || true)
+          EXT=$(find "target/${{ matrix.target }}/release" -maxdepth 1 -type f -name 'libyz_bridge.*' -printf '%f\n' | head -1 || true)
           test -n "$EXT"
           cp "target/${{ matrix.target }}/release/$EXT" dist/lib/yz_bridge.node
 
