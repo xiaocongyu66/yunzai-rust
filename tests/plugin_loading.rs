@@ -58,9 +58,16 @@ async fn community_plugins_loading() {
     if clone_plugin(&plugins_dir, "imgS-plugin", "https://github.com/erzaozi/imgS-plugin") { cloned.push("imgS-plugin"); }
 
     // 3. 启动主程序
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_yunzai"))
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunzai"));
+    command
         .current_dir(dir.path())
-        .env("YZ_NO_REDIS", "1")
+        .env("YZ_NO_REDIS", "1");
+    for name in ["LIBNODE_PATH", "YZ_BRIDGE_PATH"] {
+        if let Ok(value) = std::env::var(name) {
+            command.env(name, value);
+        }
+    }
+    let mut child = command
         .stdout(std::fs::File::create("/tmp/pl-child.log").unwrap())
         .stderr(std::fs::File::create("/tmp/pl-child-err.log").unwrap())
         .spawn()
