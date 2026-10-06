@@ -70,6 +70,18 @@ fn call_op(host: &YzHostFns, name: &CString, args: &CString) -> String {
     read_cstr(ret)
 }
 
+fn submit_async(host: &YzHostFns, id: u64, name: &CString, args: &CString) {
+    unsafe { (host.op_async_submit)(id, name.as_ptr(), args.as_ptr()) }
+}
+
+fn resolve(host: &YzHostFns, id: u64, result: &CString) {
+    unsafe { (host.resolve)(id, result.as_ptr()) }
+}
+
+fn log_message(host: &YzHostFns, level: i32, message: &CString) {
+    unsafe { (host.log)(level, message.as_ptr()) }
+}
+
 /// tsfn 在 node JS 线程创建（ready），但 dispatch_cmd 在宿主 tokio 线程调用——必须全局共享
 static CMD_TSFN: once_cell::sync::Lazy<
     DefSync<Option<ThreadsafeFunction<String, ErrorStrategy::CalleeHandled>>>,
@@ -180,7 +192,7 @@ pub async fn op_async(name: String, args: String) -> Result<String> {
                 Ok(s) => s,
                 Err(e) => return Err(Error::new(Status::GenericFailure, e.to_string())),
             };
-            unsafe { (h.op_async_submit)(id, c_name.as_ptr(), c_args.as_ptr()) };
+            submit_async(h, id, &c_name, &c_args);
         }
         None => {
             if let Some(tx) = PENDING_OP.lock().remove(&id) {
@@ -196,7 +208,7 @@ pub async fn op_async(name: String, args: String) -> Result<String> {
 pub fn resolve(id: f64, result: String) -> Result<()> {
     if let Some(h) = host() {
         let c = CString::new(result)?;
-        unsafe { (h.resolve)(id as u64, c.as_ptr()) };
+        resolve(h, id as u64, &c);
     }
     Ok(())
 }
@@ -206,7 +218,7 @@ pub fn resolve(id: f64, result: String) -> Result<()> {
 pub fn log(level: i32, msg: String) -> Result<()> {
     if let Some(h) = host() {
         let c = CString::new(msg)?;
-        unsafe { (h.log)(level, c.as_ptr()) };
+        log_message(h, level, &c);
     }
     Ok(())
 }
