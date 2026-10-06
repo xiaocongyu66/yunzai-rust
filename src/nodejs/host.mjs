@@ -261,7 +261,7 @@ globalThis.Bot = new Proxy({}, {
     if (prop === 'String') return (s) => String(s)
     if (prop === 'exit') return async (code) => op('bot_exit', { code })
     if (prop === 'once' || prop === 'on') return (ev, fn) => { log(0, `Bot.${prop}(${ev}) 事件订阅暂不支持`) }
-    return op('bot_get', { prop: String(prop) })
+    return rawOp('bot_get', { prop: String(prop) })
   },
 })
 
@@ -272,7 +272,7 @@ globalThis.cfg = new Proxy({}, {
     if (prop === 'getOther') return async () => op('cfg_get', { name: 'other' })
     if (prop === 'getdefSet') return async (n) => op('cfg_get_config', { name: n })
     if (prop === 'getConfig') return async (n) => op('cfg_get', { name: n })
-    return op('cfg_get', { name: String(prop) })
+    return rawOp('cfg_get', { name: String(prop) })
   },
 })
 
@@ -445,6 +445,6 @@ async function dispatcher(err, cmdJson) {
 globalThis.__yz_dispatcher = dispatcher
 
 // ============ 保活 ============
-setInterval(() => {}, 2 ** 31)
+setInterval(() => {}, 2 ** 31 - 1)
 log(1, `host.mjs 就绪 (node ${process.version})`)
 bridge.ready(dispatcher)
