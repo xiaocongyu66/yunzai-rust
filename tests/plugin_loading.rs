@@ -77,13 +77,21 @@ async fn community_plugins_loading() {
     }
     assert!(ready, "服务器未启动");
 
-    // 5. 等插件加载完成后读日志
-    tokio::time::sleep(Duration::from_millis(2500)).await;
+    // 5. 等 JS 引擎完成初始化；ARM runner 上首次 libnode 加载可能超过 2.5 秒
+    let mut engine_ready = false;
+    for _ in 0..150 {
+        let log = std::fs::read_to_string("/tmp/pl-child.log").unwrap_or_default();
+        if log.contains("引擎就绪") {
+            engine_ready = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
     let _ = child.kill();
     let log = std::fs::read_to_string("/tmp/pl-child.log").unwrap_or_default();
 
     // JS 引擎与插件加载断言
-    assert!(log.contains("引擎就绪"), "JS 引擎未就绪:\n{}", log);
+    assert!(engine_ready, "JS 引擎未就绪:\n{}", log);
     assert!(log.contains("加载插件 ["), "没有任何 JS 插件被加载:\n{}", log);
     // 社区插件根结构不受控（无根 index.js / npm 依赖缺失时静默跳过属预期），降级为警告
     for name in cloned {
