@@ -44,10 +44,11 @@ need_dir plugins/adapter
 need_file package.json
 need_file pnpm-lock.yaml
 need_dir node_modules
-for package in ws file-type level; do
+for package in ws file-type level body-parser token-types; do
   need_dir "node_modules/$package"
   need_file "node_modules/$package/package.json"
 done
+need_dir node_modules/.pnpm
 libnode=$(find "$root/data/libnode" -maxdepth 1 -type f -print -quit 2>/dev/null || true)
 if [[ -z "$libnode" ]]; then
   printf 'missing libnode file under: data/libnode\n' >&2
