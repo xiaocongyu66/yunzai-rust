@@ -87,7 +87,7 @@ jobs:
         working-directory: runtime-source
         run: |
           corepack enable
-          printf 'node-linker=hoisted\nshamefully-hoist=true\n' > .npmrc
+          printf 'shamefully-hoist=true\n' > .npmrc
           pnpm install --prod --no-frozen-lockfile
           test -f package.json
           test -f pnpm-lock.yaml
@@ -106,9 +106,18 @@ jobs:
           cp -aL runtime-source/plugins/. dist/plugins/
           cp -aL plugins/. dist/plugins/
           cp -aL runtime-source/lib/. dist/lib/
-          # Move the production dependency tree instead of duplicating it; the
-          # ARM runner must keep enough workspace space for the libnode payload.
-          mv runtime-source/node_modules dist/node_modules
+          # Materialize the production dependency tree so the artifact does not
+          # depend on pnpm's symlinks or hidden virtual-store directories.
+          cp -aL runtime-source/node_modules/. dist/node_modules/
+          rm -rf dist/node_modules/.pnpm dist/node_modules/.modules.yaml
+          if [[ -f dist/node_modules/lodash/index.js ]]; then
+            sed -i 's#../../../node_modules/es-toolkit/#../es-toolkit/#' dist/node_modules/lodash/index.js
+          fi
+          if find dist/node_modules -type l -print -quit | grep -q .; then
+            echo "::error::runtime node_modules contains unresolved symlinks"
+            find dist/node_modules -type l -print | head -20
+            exit 1
+          fi
           cp -aL runtime-source/renderers/. dist/renderers/
           cp -aL runtime-source/resources/. dist/resources/
           cp runtime-source/package.json dist/package.json
