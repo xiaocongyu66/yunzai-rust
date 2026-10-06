@@ -127,7 +127,8 @@ mod resource_tests {
         for (source, expected) in cases {
             let html = format!("<style>body{{margin:0;width:64px;height:32px}}div{{width:16px;height:16px}}</style>{source}<div></div>");
             for base in [relative, root.path().to_str().unwrap()] {
-                let png = super::render(&html, 64, 1.0, &[], base).unwrap();
+                let normalized = super::normalize_base_dir(base).unwrap();
+                let png = super::legacy_render(&html, 64, 1.0, &[], &normalized).unwrap();
                 let image = image::load_from_memory(&png).unwrap().to_rgba8();
                 assert_eq!(image.get_pixel(8, 8).0, expected, "{source}, base={base}");
             }
@@ -159,7 +160,8 @@ mod resource_tests {
         ] {
             let html = format!("<style>body{{margin:0;width:64px;height:32px}}div{{width:16px;height:16px}}</style><link rel='stylesheet' href='{sheet}'><div></div>");
             for base in [relative, root.path().to_str().unwrap()] {
-                let png = super::render(&html, 64, 1.0, &[], base).unwrap();
+                let normalized = super::normalize_base_dir(base).unwrap();
+                let png = super::legacy_render(&html, 64, 1.0, &[], &normalized).unwrap();
                 let image = image::load_from_memory(&png).unwrap().to_rgba8();
                 assert_eq!(image.get_pixel(8, 8).0, expected, "{sheet}, base={base}");
             }
