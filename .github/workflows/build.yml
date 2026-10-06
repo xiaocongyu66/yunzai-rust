@@ -44,6 +44,7 @@ jobs:
           BRIDGE=$(find "target/${{ matrix.target }}/release" -maxdepth 1 -type f -name 'libyz_bridge.*' -printf '%f\n' | head -1 || true)
           if [ -n "$BRIDGE" ]; then
             export YZ_BRIDGE_BIN="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/$BRIDGE"
+            echo "YZ_BRIDGE_BIN=$YZ_BRIDGE_BIN" >> "$GITHUB_ENV"
             echo "embed bridge: $YZ_BRIDGE_BIN"
           fi
           cargo build --workspace --release --target ${{ matrix.target }}
